@@ -90,7 +90,7 @@ def main(argv=None) -> int:
     )
     if not mapper.calibrated:
         print("[warn] no intrinsics file -> using fallback FOV focal estimate "
-              "(~5% angle error; run tools/calibrate_camera.py in Phase 4)")
+              "(~5% angle error; expected until the Phase 4 calibration tool lands)")
 
     detector = build_detector(cfg)
     tracker = SingleTargetTracker(

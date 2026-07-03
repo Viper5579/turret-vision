@@ -1,5 +1,7 @@
+.DS_Store
 __pycache__/
 *.pyc
+*.egg-info/
 logs/
 .pytest_cache/
 .ruff_cache/

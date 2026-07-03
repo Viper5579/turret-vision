@@ -13,6 +13,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
 
+[tool.setuptools.packages.find]
+include = ["turretvision*"]
+
 [tool.ruff]
 line-length = 110
 target-version = "py310"

@@ -15,11 +15,19 @@ class Overlay:
 
     def render(self, img: np.ndarray, track: TrackState | None,
                az_el: tuple[float, float] | None,
-               fps: float, stage_ms: dict[str, float]) -> np.ndarray:
+               fps: float, stage_ms: dict[str, float],
+               detections: list | None = None) -> np.ndarray:
         out = img.copy()
         h, w = out.shape[:2]
         cv2.drawMarker(out, (w // 2, h // 2), (128, 128, 128),
                        cv2.MARKER_CROSS, 20, 1)  # boresight reference
+
+        if detections:
+            # Raw detector output (thin boxes) so threshold/area tuning is
+            # visible directly, independent of what the tracker accepted.
+            for d in detections:
+                x, y, bw, bh = d.bbox
+                cv2.rectangle(out, (x, y), (x + bw, y + bh), (127, 162, 212), 1)
 
         if track is not None:
             c = (0, 165, 255) if track.coasting else (0, 255, 0)

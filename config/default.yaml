@@ -62,3 +62,8 @@ ui:
   show_window: true        # false for headless runs
   draw_trail: true
   trail_len: 32
+  tune_port: 8089          # browser tuning UI port (main.py --tune)
+
+# NOTE: a config/local.yaml next to this file is auto-merged on top of it.
+# The tuning UI's Save button writes there, so this file (and its comments)
+# never gets rewritten. local.yaml is gitignored.

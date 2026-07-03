@@ -36,6 +36,27 @@ class SingleTargetTracker:
         self._conf = 0.0
         self._has_track = False
 
+    # -- live-tunable knobs (tuning UI) -----------------------------------
+    @property
+    def estimator(self) -> StateEstimator:
+        return self._est
+
+    @property
+    def gate_px(self) -> float:
+        return self._gate
+
+    @gate_px.setter
+    def gate_px(self, v: float) -> None:
+        self._gate = float(v)
+
+    @property
+    def max_coast_frames(self) -> int:
+        return self._max_coast
+
+    @max_coast_frames.setter
+    def max_coast_frames(self, v: int) -> None:
+        self._max_coast = int(v)
+
     def step(self, detections: list[Detection], t: float) -> TrackState | None:
         chosen: Detection | None = None
         if self._has_track:

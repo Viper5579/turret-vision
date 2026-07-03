@@ -73,6 +73,10 @@ def main(argv=None) -> int:
     ap.add_argument("--replay", default=None, help="video file for --source replay")
     ap.add_argument("--headless", action="store_true", help="no window (SSH/tests)")
     ap.add_argument("--max-frames", type=int, default=None)
+    ap.add_argument("--tune", action="store_true",
+                    help="serve the browser tuning UI (works headless; see README)")
+    ap.add_argument("--tune-port", type=int, default=None,
+                    help="tuning UI port (default: ui.tune_port from config, or 8089)")
     args = ap.parse_args(argv)
 
     cfg = Config.load(args.config)
@@ -100,7 +104,18 @@ def main(argv=None) -> int:
     )
     link = build_link(cfg)
     overlay = Overlay(cfg.get("ui.draw_trail", True), cfg.get("ui.trail_len", 32))
-    min_conf = cfg.get("tracking.min_confidence_output")
+    # Holder (not a bare float) so the tuning UI can adjust it live; the loop
+    # reads it fresh each frame either way.
+    min_conf_ref = {"value": cfg.get("tracking.min_confidence_output")}
+
+    tuner = None
+    if args.tune:
+        from .tune.params import build_registry
+        from .tune.server import TuningServer
+        registry = build_registry(detector, tracker.estimator, tracker, min_conf_ref)
+        tuner = TuningServer(registry, config_path=args.config,
+                             port=args.tune_port or cfg.get("ui.tune_port", 8089))
+        tuner.start()
 
     fps = RollingRate()
     timer = StageTimer()
@@ -125,6 +140,8 @@ def main(argv=None) -> int:
                 if isinstance(src, V4L2Camera):
                     continue  # camera: no NEW frame yet, keep polling
                 break         # replay/synthetic: exhausted
+            if tuner:
+                tuner.apply_pending()  # slider changes land here, pipeline-thread only
             timer.start()
             dets = detector.detect(frame)
             timer.mark("detect")
@@ -138,7 +155,7 @@ def main(argv=None) -> int:
                 # the hot loop trig-free; revisit if edge-of-frame rates matter.
                 az_rate = track.vx * mapper.deg_per_px
                 el_rate = -track.vy * mapper.deg_per_px
-                valid = track.confidence >= min_conf
+                valid = track.confidence >= min_conf_ref["value"]
                 aim = AimOutput(frame.t, valid, az, el, az_rate, el_rate, track.confidence)
             else:
                 az = el = az_rate = el_rate = 0.0
@@ -157,13 +174,25 @@ def main(argv=None) -> int:
                 else:
                     csv_writer.writerow([f"{frame.t:.4f}", 0, "", "", "", "", "", "", "0.0", ""])
 
-            if show:
-                import cv2
+            if show or tuner:
                 img = overlay.render(frame.img, track,
-                                     (az, el) if track else None, fps.hz, timer.report())
-                cv2.imshow("turret-vision", img)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                                     (az, el) if track else None, fps.hz, timer.report(),
+                                     detections=dets)
+                if tuner:
+                    r = timer.report()
+                    tuner.publish(img, {
+                        "fps": fps.hz, "n_dets": len(dets),
+                        "detect_ms": r.get("detect", 0.0), "track_ms": r.get("track", 0.0),
+                        "tracking": track is not None,
+                        "coasting": bool(track.coasting) if track else False,
+                        "az": az, "el": el, "az_rate": az_rate, "el_rate": el_rate,
+                        "conf": track.confidence if track else 0.0,
+                    })
+                if show:
+                    import cv2
+                    cv2.imshow("turret-vision", img)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
 
             frames += 1
             if args.max_frames and frames >= args.max_frames:
@@ -171,6 +200,8 @@ def main(argv=None) -> int:
     finally:
         src.stop()
         link.close()
+        if tuner:
+            tuner.stop()
         if csv_file:
             csv_file.close()
         if show:

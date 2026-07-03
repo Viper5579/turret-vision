@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+logs/
+.pytest_cache/
+.ruff_cache/
+config/camera_intrinsics.yaml
+config/boresight.yaml

@@ -1,0 +1,64 @@
+# Master config. Rule applied throughout the codebase: if changing a value
+# shouldn't require re-reading code, it lives here.
+
+camera:
+  backend: v4l2            # v4l2 | replay | synthetic
+  device: /dev/video0
+  width: 1280
+  height: 800
+  fps: 100                 # requested; verify real modes with tools/enumerate_camera.py
+  fourcc: MJPG
+  replay_path: null        # video file for backend=replay
+  replay_realtime: true    # pace replay at recorded fps (false = as fast as possible)
+
+calibration:
+  intrinsics_file: config/camera_intrinsics.yaml   # optional until Phase 4
+  # Fallback when no intrinsics file exists yet: approximate focal length from
+  # horizontal FOV. WHY: pixel->angle math must work on day one; a datasheet FOV
+  # gives ~5% angle error, which is fine until the ChArUco calibration replaces it.
+  fallback_hfov_deg: 70.0
+  undistort_points: true    # only applied when a real intrinsics file is loaded
+  boresight_yaw_deg: 0.0    # camera-vs-launcher angular offset (Phase 4 tool fills these)
+  boresight_pitch_deg: 0.0
+
+detection:
+  mode: frame_diff         # frame_diff | aruco | color_mask
+  frame_diff:
+    threshold: 25          # abs-diff intensity threshold (0-255)
+    min_area_px: 40
+    max_area_px: 40000
+    morph_kernel: 3
+    static_gate_dps: 5.0   # suppress detection while commanded turret speed exceeds this (v1 gate)
+    ego_motion_comp: false # Phase 4.5
+  aruco:
+    dictionary: DICT_4X4_50
+    marker_size_m: 0.10
+  color_mask:
+    hsv_low: [5, 120, 120]
+    hsv_high: [25, 255, 255]
+    min_area_px: 60
+
+tracking:
+  filter: alpha_beta
+  alpha: 0.5               # position correction gain
+  beta: 0.2                # velocity correction gain
+  max_coast_frames: 8      # predict through misses this long before dropping track
+  gate_px: 120             # max px distance for detection<->track association
+  min_confidence_output: 0.4  # below this the link sends target_valid=false
+
+link:
+  backend: console         # console | mock | serial (mock/serial arrive in Phase 3)
+  port: /dev/ttyUSB0
+  baud: 115200
+  aim_rate_hz: 50
+  console_rate_hz: 5       # human-readable print rate (full rate would flood the terminal)
+
+logging:
+  run_log_dir: logs
+  csv_state_log: true      # per-frame CSV for offline plotting/regression
+  log_level: INFO
+
+ui:
+  show_window: true        # false for headless runs
+  draw_trail: true
+  trail_len: 32

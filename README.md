@@ -17,12 +17,33 @@ is bidirectional from v1, and everything runs with zero hardware attached.
 - [ ] Phase 4.5 — ego-motion compensated frame differencing
 - [ ] Phase 5 — replay regression harness, docs polish
 
-## Setup (Jetson)
+## Setup (dev machine / CI)
 ```bash
-pip install -e ".[dev]"       # inside your working container/venv
-# NOTE: on the Jetson keep your existing numpy<2 pin — this code is agnostic,
-# but your OpenCV build was compiled against numpy 1.x ABI.
+pip install -e ".[dev]"
 ```
+
+## Setup (Jetson)
+JetPack ships an OpenCV built against numpy 1.x, with GStreamer/CUDA/CSI
+support that the generic PyPI `opencv-python` wheel does NOT have. A plain
+`pip install -e ".[dev]"` will pull that wheel plus numpy 2.x and silently
+shadow the system build — do this instead:
+
+```bash
+# 1. JetPack's stock setuptools (59.x) is too old for editable installs
+#    (PEP 660 needs >=64):
+pip3 install --user --upgrade "setuptools>=64" wheel
+
+# 2. Install WITHOUT deps so system cv2/numpy stay untouched:
+pip3 install -e . --no-deps --no-build-isolation
+
+# 3. Add the remaining deps individually (never opencv-python/numpy here):
+pip3 install pyyaml pyserial pytest ruff
+```
+
+If you already clobbered the system packages, recover with
+`pip3 uninstall opencv-python numpy -y` and confirm `python3 -c "import cv2;
+print(cv2.__version__, cv2.__file__)"` points back at
+`/usr/lib/python3.10/dist-packages`.
 
 ## Run
 ```bash
@@ -41,6 +62,19 @@ python -m turretvision.main --source replay --replay logs/run1.mp4
 ```
 `q` quits the window. Per-frame state lands in `logs/state.csv` for plotting.
 
+## Tuning UI (browser)
+```bash
+python -m turretvision.main --tune --headless     # on the Jetson, over SSH
+```
+Then open `http://<jetson-ip>:8089` from any machine on the LAN. You get the
+live camera view (with raw detection boxes and the track overlay), pipeline
+stats, and sliders for every detector/tracker knob. Changes apply to the
+running pipeline instantly; **Save to config** persists them to
+`config/local.yaml`, which is auto-merged over `default.yaml` on every
+subsequent run (tuned or not) and is gitignored. **Revert** restores the
+values the session started with. `--tune` also works alongside the local
+cv2 window, and the port comes from `ui.tune_port` or `--tune-port`.
+
 ## Verify
 ```bash
 python -m pytest -q      # 14 tests: filters, geometry, tracker, end-to-end synthetic
@@ -56,6 +90,24 @@ ruff check .
   `tracking.min_confidence_output`
 
 ## Troubleshooting
+- **Constant false detections with nothing moving (live camera)**: disable
+  auto-exposure and auto-white-balance FIRST, before touching any
+  `detection.frame_diff.*` knob. Continuous AE/AWB hunting shifts global
+  brightness/color between frames, which frame differencing reads as motion
+  everywhere — it masquerades as a detector sensitivity problem and sends you
+  tuning the wrong thing. On a UVC camera (e.g. the OV9782):
+  ```bash
+  v4l2-ctl -d /dev/video0 -c auto_exposure=1            # manual mode
+  v4l2-ctl -d /dev/video0 -c white_balance_automatic=0
+  v4l2-ctl -d /dev/video0 -c white_balance_temperature=4600
+  v4l2-ctl -d /dev/video0 -c backlight_compensation=0
+  v4l2-ctl -d /dev/video0 -c exposure_time_absolute=80  # 100µs units; see note
+  ```
+  Exposure must fit the frame budget: at 100 fps the frame is 10 ms, so
+  `exposure_time_absolute` above ~100 (10 ms) will blow out whites and/or drop
+  the real frame rate. Start around 80 and iterate against room lighting.
+  Verify the settings held with `v4l2-ctl -d /dev/video0 --list-ctrls`
+  (manual controls should no longer show `flags=inactive`).
 - **Black window / no camera**: check `v4l2-ctl --list-devices`; the OV9782 must be
   the device in `camera.device`.
 - **fps far below requested**: the UVC firmware fell back to another mode — this is

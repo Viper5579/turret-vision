@@ -41,6 +41,51 @@ class FrameDiffDetector(Detector):
     def set_turret_rate(self, dps: float) -> None:
         self._turret_rate = abs(dps)
 
+    # -- live-tunable knobs (tuning UI) -----------------------------------
+    # Setters exist so the tuning server has a public surface that keeps
+    # derived state (the morphology kernel) consistent with the value.
+
+    @property
+    def threshold(self) -> int:
+        return self._thresh
+
+    @threshold.setter
+    def threshold(self, v: int) -> None:
+        self._thresh = int(v)
+
+    @property
+    def min_area_px(self) -> int:
+        return self._min_a
+
+    @min_area_px.setter
+    def min_area_px(self, v: int) -> None:
+        self._min_a = int(v)
+
+    @property
+    def max_area_px(self) -> int:
+        return self._max_a
+
+    @max_area_px.setter
+    def max_area_px(self, v: int) -> None:
+        self._max_a = int(v)
+
+    @property
+    def morph_kernel(self) -> int:
+        return self._kernel.shape[0]
+
+    @morph_kernel.setter
+    def morph_kernel(self, v: int) -> None:
+        v = max(1, int(v))
+        self._kernel = np.ones((v, v), np.uint8)
+
+    @property
+    def static_gate_dps(self) -> float:
+        return self._gate_dps
+
+    @static_gate_dps.setter
+    def static_gate_dps(self, v: float) -> None:
+        self._gate_dps = float(v)
+
     def detect(self, frame: Frame) -> list[Detection]:
         gray = cv2.cvtColor(frame.img, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)  # WHY: kills single-pixel sensor noise

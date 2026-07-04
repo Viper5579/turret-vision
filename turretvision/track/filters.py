@@ -40,6 +40,24 @@ class AlphaBetaFilter(StateEstimator):
         self._a, self._b = alpha, beta
         self._s: KinematicState | None = None
 
+    # Live-tunable gains (tuning UI). Safe to change mid-track: they only
+    # weight the next correction, no internal state depends on them.
+    @property
+    def alpha(self) -> float:
+        return self._a
+
+    @alpha.setter
+    def alpha(self, v: float) -> None:
+        self._a = float(v)
+
+    @property
+    def beta(self) -> float:
+        return self._b
+
+    @beta.setter
+    def beta(self, v: float) -> None:
+        self._b = float(v)
+
     def update(self, x: float, y: float, t: float) -> KinematicState:
         if self._s is None:
             self._s = KinematicState(x, y, 0.0, 0.0, t)

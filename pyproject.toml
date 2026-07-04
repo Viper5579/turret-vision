@@ -1,3 +1,10 @@
+[build-system]
+# setuptools>=64 is required for PEP 660 editable installs; JetPack images ship
+# 59.x, so Jetson users must `pip install --upgrade "setuptools>=64" wheel` first
+# (see README "Setup (Jetson)").
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "turret-vision"
 version = "0.2.0"
@@ -15,6 +22,9 @@ dev = ["pytest", "ruff"]
 
 [tool.setuptools.packages.find]
 include = ["turretvision*"]
+
+[tool.setuptools.package-data]
+turretvision = ["tune/*.html"]
 
 [tool.ruff]
 line-length = 110

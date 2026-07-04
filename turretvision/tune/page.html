@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>turret-vision · tuning</title>
+<style>
+  :root {
+    --ivory: #FAF9F5;
+    --paper: #FFFFFF;
+    --border: #E5E1D5;
+    --border-soft: #EFECE3;
+    --ink: #1F1E1D;
+    --muted: #7A7568;
+    --accent: #D97757;        /* coral */
+    --accent-deep: #B85F3F;
+    --kraft: #D4A27F;
+    --manilla: #EBDBBC;
+    --track: #6D8A5B;
+    --coast: #C08B2D;
+    --lost: #A8A294;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--ivory);
+    color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+  }
+  ::selection { background: var(--manilla); }
+
+  header {
+    display: flex; align-items: baseline; gap: 14px;
+    padding: 22px 28px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font: 500 22px/1 Georgia, "Times New Roman", serif;
+    letter-spacing: -0.2px;
+  }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .conn { margin-left: auto; display: flex; align-items: center; gap: 7px;
+                 font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--track);
+         transition: background .3s; }
+  .dot.stale { background: var(--lost); }
+
+  main {
+    display: grid; grid-template-columns: minmax(0, 1fr) 400px;
+    gap: 20px; padding: 20px 28px 40px; max-width: 1480px; margin: 0 auto;
+  }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  /* ---- video panel ---- */
+  .videowrap { position: relative; background: #141413; }
+  .videowrap img { display: block; width: 100%; height: auto; }
+  .live {
+    position: absolute; top: 12px; right: 12px;
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(20,20,19,.72); color: #FAF9F5;
+    font-size: 11px; letter-spacing: .12em; padding: 4px 10px;
+    border-radius: 99px; backdrop-filter: blur(4px);
+  }
+  .live .dot { width: 6px; height: 6px; background: var(--accent); }
+
+  .statbar {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--border-soft);
+  }
+  .stat { padding: 14px 18px; border-right: 1px solid var(--border-soft); }
+  .stat:last-child { border-right: none; }
+  .stat .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+             color: var(--muted); margin-bottom: 2px; }
+  .stat .v { font: 500 19px/1.2 Georgia, serif; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 12px; color: var(--muted); font-family: inherit; }
+
+  .targetbar {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 14px 18px; border-top: 1px solid var(--border-soft);
+  }
+  .pill {
+    font-size: 11px; letter-spacing: .12em; padding: 5px 12px; border-radius: 99px;
+    color: #fff; background: var(--lost); transition: background .25s;
+  }
+  .pill.track { background: var(--track); }
+  .pill.coast { background: var(--coast); }
+  .angles { font-variant-numeric: tabular-nums; font-size: 13.5px; color: var(--ink); }
+  .angles span { color: var(--muted); margin-right: 3px; }
+  .confwrap { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .confwrap .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+                 color: var(--muted); }
+  .confbar { width: 120px; height: 6px; border-radius: 99px; background: var(--border-soft);
+             overflow: hidden; }
+  .confbar i { display: block; height: 100%; width: 0; background: var(--accent);
+               border-radius: 99px; transition: width .2s; }
+  canvas#spark { width: 130px; height: 30px; }
+
+  /* ---- controls panel ---- */
+  .panelhead {
+    display: flex; align-items: center; gap: 10px;
+    padding: 16px 18px; border-bottom: 1px solid var(--border-soft);
+  }
+  .panelhead h2 { font: 500 16px/1 Georgia, serif; }
+  .panelhead .spacer { flex: 1; }
+  button {
+    font: 500 13px/1 ui-sans-serif, -apple-system, sans-serif;
+    padding: 8px 14px; border-radius: 9px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--paper); color: var(--ink);
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  button:hover { border-color: var(--kraft); background: var(--ivory); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); }
+
+  .group { padding: 6px 18px 14px; }
+  .group + .group { border-top: 1px solid var(--border-soft); }
+  .group h3 {
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; padding: 12px 0 4px;
+  }
+  .param { padding: 9px 0 4px; }
+  .param .row1 { display: flex; align-items: baseline; gap: 8px; }
+  .param label { font-weight: 500; font-size: 13.5px; }
+  .param .val {
+    margin-left: auto;
+    width: 74px; text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px; color: var(--ink);
+    border: 1px solid transparent; border-radius: 7px; padding: 3px 6px;
+    background: transparent;
+  }
+  .param .val:hover { border-color: var(--border); background: var(--paper); }
+  .param .val:focus { outline: none; border-color: var(--accent); background: var(--paper); }
+  .param .help { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  input[type=range] {
+    width: 100%; height: 22px; margin: 4px 0 0; appearance: none; background: transparent;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 5px; border-radius: 99px;
+    background: linear-gradient(to right,
+      var(--accent) 0%, var(--accent) var(--fill, 50%),
+      var(--border) var(--fill, 50%), var(--border) 100%);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    appearance: none; width: 16px; height: 16px; margin-top: -5.5px;
+    border-radius: 50%; background: var(--paper);
+    border: 2px solid var(--accent);
+    box-shadow: 0 1px 3px rgba(31,30,29,.18);
+    transition: transform .12s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.12); }
+  input[type=range]::-moz-range-track { height: 5px; border-radius: 99px; background: var(--border); }
+  input[type=range]::-moz-range-progress { height: 5px; border-radius: 99px; background: var(--accent); }
+  input[type=range]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--paper); border: 2px solid var(--accent);
+  }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 20px);
+    background: #141413; color: var(--ivory);
+    padding: 10px 18px; border-radius: 10px; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 0 26px; }
+  footer code { font-size: 11.5px; background: var(--manilla); color: var(--ink);
+                padding: 1px 6px; border-radius: 5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>turret-vision</h1>
+  <span class="sub">live tuning</span>
+  <span class="conn"><span class="dot" id="conn"></span><span id="connlabel">connecting…</span></span>
+</header>
+
+<main>
+  <section>
+    <div class="card">
+      <div class="videowrap">
+        <img id="stream" src="/stream.mjpg" alt="live pipeline view">
+        <span class="live"><span class="dot"></span>LIVE</span>
+      </div>
+      <div class="statbar">
+        <div class="stat"><div class="k">Pipeline</div><div class="v"><span id="fps">–</span> <small>fps</small></div></div>
+        <div class="stat"><div class="k">Detect</div><div class="v"><span id="ms_detect">–</span> <small>ms</small></div></div>
+        <div class="stat"><div class="k">Track</div><div class="v"><span id="ms_track">–</span> <small>ms</small></div></div>
+        <div class="stat"><div class="k">Detections</div><div class="v" id="ndets">–</div></div>
+      </div>
+      <div class="targetbar">
+        <span class="pill" id="state">NO TARGET</span>
+        <span class="angles"><span>az</span><b id="az">–</b>&deg; &nbsp;<span>el</span><b id="el">–</b>&deg;</span>
+        <span class="angles"><span>rate</span><b id="rates">–</b> &deg;/s</span>
+        <span class="confwrap">
+          <span class="k">conf</span>
+          <span class="confbar"><i id="confbar"></i></span>
+          <canvas id="spark" width="260" height="60"></canvas>
+        </span>
+      </div>
+    </div>
+    <footer style="padding-top:14px">
+      Changes apply to the running pipeline instantly. <b>Save</b> writes them to
+      <code>config/local.yaml</code>, which overrides <code>default.yaml</code> on every run.
+    </footer>
+  </section>
+
+  <aside class="card" style="align-self:start">
+    <div class="panelhead">
+      <h2>Parameters</h2>
+      <span class="spacer"></span>
+      <button id="revert" title="Restore the values this session started with">Revert</button>
+      <button id="save" class="primary">Save to config</button>
+    </div>
+    <div id="groups"></div>
+  </aside>
+</main>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const controls = new Map();   // key -> {slider, box, spec}
+let lastStateAt = 0;
+
+function setFill(slider) {
+  const min = +slider.min, max = +slider.max, v = +slider.value;
+  slider.style.setProperty("--fill", ((v - min) / (max - min) * 100) + "%");
+}
+
+function fmt(spec, v) {
+  return spec.kind === "int" ? String(Math.round(v))
+       : (+v).toFixed(Math.max(0, (String(spec.step).split(".")[1] || "").length));
+}
+
+const debouncers = new Map();
+function sendParam(key, value) {
+  clearTimeout(debouncers.get(key));
+  debouncers.set(key, setTimeout(() => {
+    fetch("/api/set", { method: "POST", headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({ key, value: +value }) })
+      .catch(() => toast("connection lost — change not applied"));
+  }, 60));
+}
+
+function buildControls(params) {
+  const byGroup = new Map();
+  for (const p of params) {
+    if (!byGroup.has(p.group)) byGroup.set(p.group, []);
+    byGroup.get(p.group).push(p);
+  }
+  const root = $("groups");
+  root.textContent = "";
+  for (const [group, ps] of byGroup) {
+    const g = document.createElement("div");
+    g.className = "group";
+    const h = document.createElement("h3");
+    h.textContent = group;
+    g.appendChild(h);
+    for (const spec of ps) {
+      const wrap = document.createElement("div");
+      wrap.className = "param";
+
+      const row1 = document.createElement("div");
+      row1.className = "row1";
+      const label = document.createElement("label");
+      label.textContent = spec.label;
+      const box = document.createElement("input");
+      box.className = "val";
+      box.inputMode = "decimal";
+      box.value = fmt(spec, spec.value);
+      row1.append(label, box);
+
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = spec.min; slider.max = spec.max; slider.step = spec.step;
+      slider.value = spec.value;
+      setFill(slider);
+
+      const help = document.createElement("div");
+      help.className = "help";
+      help.textContent = spec.help;
+
+      slider.addEventListener("input", () => {
+        box.value = fmt(spec, slider.value);
+        setFill(slider);
+        sendParam(spec.key, slider.value);
+      });
+      box.addEventListener("change", () => {
+        let v = parseFloat(box.value);
+        if (Number.isNaN(v)) { box.value = fmt(spec, slider.value); return; }
+        v = Math.min(Math.max(v, spec.min), spec.max);
+        slider.value = v;
+        box.value = fmt(spec, v);
+        setFill(slider);
+        sendParam(spec.key, v);
+      });
+
+      wrap.append(row1, slider, help);
+      g.appendChild(wrap);
+      controls.set(spec.key, { slider, box, spec });
+    }
+    root.appendChild(g);
+  }
+}
+
+function refreshControlValues(params) {
+  for (const p of params) {
+    const c = controls.get(p.key);
+    if (!c) continue;
+    c.slider.value = p.value;
+    c.box.value = fmt(c.spec, p.value);
+    setFill(c.slider);
+  }
+}
+
+function drawSpark(hist) {
+  const cv = $("spark"), ctx = cv.getContext("2d");
+  const w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  if (!hist.length) return;
+  ctx.beginPath();
+  hist.forEach((v, i) => {
+    const x = i / Math.max(1, hist.length - 1) * (w - 4) + 2;
+    const y = h - 4 - v * (h - 8);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.strokeStyle = "#D97757";
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+
+function updateStats(s, hist) {
+  $("fps").textContent = s.fps !== undefined ? s.fps.toFixed(1) : "–";
+  $("ms_detect").textContent = s.detect_ms !== undefined ? s.detect_ms.toFixed(2) : "–";
+  $("ms_track").textContent = s.track_ms !== undefined ? s.track_ms.toFixed(2) : "–";
+  $("ndets").textContent = s.n_dets ?? "–";
+  const pill = $("state");
+  if (s.tracking && s.coasting) { pill.textContent = "COASTING"; pill.className = "pill coast"; }
+  else if (s.tracking)          { pill.textContent = "TRACKING"; pill.className = "pill track"; }
+  else                          { pill.textContent = "NO TARGET"; pill.className = "pill"; }
+  $("az").textContent = s.tracking ? s.az.toFixed(2) : "–";
+  $("el").textContent = s.tracking ? s.el.toFixed(2) : "–";
+  $("rates").textContent = s.tracking
+      ? `${s.az_rate >= 0 ? "+" : ""}${s.az_rate.toFixed(1)}, ${s.el_rate >= 0 ? "+" : ""}${s.el_rate.toFixed(1)}`
+      : "–";
+  $("confbar").style.width = ((s.conf || 0) * 100) + "%";
+  drawSpark(hist || []);
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/state");
+    const data = await r.json();
+    if (!controls.size) buildControls(data.params);
+    updateStats(data.stats, data.conf_history);
+    lastStateAt = Date.now();
+  } catch (e) { /* handled by the staleness check */ }
+  const stale = Date.now() - lastStateAt > 2500;
+  $("conn").className = "dot" + (stale ? " stale" : "");
+  $("connlabel").textContent = stale ? "reconnecting…" : "connected";
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "show";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.className = "", 2600);
+}
+
+$("save").addEventListener("click", async () => {
+  try {
+    const r = await fetch("/api/save", { method: "POST", body: "{}" });
+    const { saved } = await r.json();
+    toast("Saved to " + saved);
+  } catch (e) { toast("Save failed — is the pipeline still running?"); }
+});
+
+$("revert").addEventListener("click", async () => {
+  try {
+    await fetch("/api/revert", { method: "POST", body: "{}" });
+    // Values apply on the next pipeline frame; fetch them back shortly after.
+    setTimeout(async () => {
+      const data = await (await fetch("/api/state")).json();
+      refreshControlValues(data.params);
+      toast("Reverted to session-start values");
+    }, 250);
+  } catch (e) { toast("Revert failed"); }
+});
+
+// If the camera stalls, the browser eventually drops the MJPEG socket; nudge it back.
+$("stream").addEventListener("error", () => {
+  setTimeout(() => { $("stream").src = "/stream.mjpg?" + Date.now(); }, 1500);
+});
+
+poll();
+setInterval(poll, 500);
+</script>
+</body>
+</html>

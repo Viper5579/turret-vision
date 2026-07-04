@@ -6,4 +6,5 @@ logs/
 .pytest_cache/
 .ruff_cache/
 config/camera_intrinsics.yaml
+config/local.yaml
 config/boresight.yaml

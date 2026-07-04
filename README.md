@@ -129,9 +129,17 @@ ruff check .
      no matter what the mode says. Lock manual exposure (previous bullet, or
      the tuning UI's Camera section) and keep `exposure_time_absolute` under
      the frame period.
-  3. **The Python loop itself.** Rule the camera in or out with
-     `python tools/measure_capture.py /dev/video0` — a bare grab-only loop.
-     Camera fast + pipeline slow = processing bottleneck; profile that
-     separately instead of touching camera settings.
+  3. **Software JPEG decode.** Decoding 1280x800 MJPG on the CPU costs
+     ~10–17ms per frame — a ~35–60fps ceiling even when the camera delivers
+     100. `python tools/measure_capture.py /dev/video0` measures delivery and
+     decode separately and prints a verdict. If decode is the bottleneck, set
+     `camera.backend: gstreamer` — on the Jetson that routes decode through
+     the hardware block (`nvv4l2decoder`) instead of the CPU. This needs the
+     GStreamer-enabled system OpenCV (yet another reason never to let pip
+     shadow it).
+  4. **The Python loop itself.** If `measure_capture.py` says capture is at
+     full rate but the pipeline is still slow, the bottleneck is
+     detect/track/overlay processing — profile that separately instead of
+     touching camera settings.
 - **`[warn] no intrinsics file`**: expected until Phase 4 calibration; angles carry
   ~5% scale error from the FOV fallback, fine for bring-up.

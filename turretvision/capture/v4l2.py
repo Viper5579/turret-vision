@@ -37,6 +37,18 @@ class V4L2Camera(FrameSource):
         self._idx = 0
 
     def start(self) -> None:
+        self._open()
+        if self._ctrls:
+            # Re-apply saved driver controls (exposure/WB locks) — they do not
+            # survive reboot/replug on their own.
+            uvc_ctrl.apply_ctrls(self._device, self._ctrls)
+        self._run = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _open(self) -> None:
+        """Open the capture and negotiate the mode. Subclasses swap this out
+        (GstCamera) while keeping the grab thread and ctrl handling."""
         self._cap = cv2.VideoCapture(self._device, cv2.CAP_V4L2)
         if not self._cap.isOpened():
             raise RuntimeError(f"cannot open camera {self._device}")
@@ -62,15 +74,8 @@ class V4L2Camera(FrameSource):
             print(f"[v4l2] WARNING: pixel format fell back to {got_cc} — raw formats are "
                   f"fps-capped (YUYV@1280x800 is ~10fps on the OV9782). Verify supported "
                   f"modes with tools/enumerate_camera.py {self._device}")
-        if self._ctrls:
-            # Re-apply saved driver controls (exposure/WB locks) — they do not
-            # survive reboot/replug on their own.
-            uvc_ctrl.apply_ctrls(self._device, self._ctrls)
         self._w, self._h = got_w, got_h
         self.mode_desc = f"{got_cc} {got_w}×{got_h} @ {got_fps:.0f} fps"
-        self._run = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
 
     def _loop(self) -> None:
         assert self._cap is not None

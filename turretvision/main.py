@@ -39,7 +39,8 @@ def build_source(cfg: Config, args) -> FrameSource:
     if backend == "v4l2":
         return V4L2Camera(cfg.get("camera.device"), cfg.get("camera.width"),
                           cfg.get("camera.height"), cfg.get("camera.fps"),
-                          cfg.get("camera.fourcc", "MJPG"))
+                          cfg.get("camera.fourcc", "MJPG"),
+                          ctrls=cfg.get("camera.v4l2_ctrls", None) or {})
     if backend == "replay":
         path = args.replay or cfg.get("camera.replay_path")
         if not path:
@@ -110,11 +111,22 @@ def main(argv=None) -> int:
 
     tuner = None
     if args.tune:
-        from .tune.params import build_registry
+        from .tune.params import add_camera_params, build_registry
         from .tune.server import TuningServer
         registry = build_registry(detector, tracker.estimator, tracker, min_conf_ref)
+        if isinstance(src, V4L2Camera):
+            from .capture import uvc_ctrl
+            cam = uvc_ctrl.probe(src.device)
+            if cam:
+                n = add_camera_params(registry, cam)
+                print(f"[tune] exposing {n} UVC camera controls via v4l2-ctl")
+            else:
+                print("[tune] no UVC controls (v4l2-ctl missing or device won't enumerate); "
+                      "camera section disabled")
         tuner = TuningServer(registry, config_path=args.config,
-                             port=args.tune_port or cfg.get("ui.tune_port", 8089))
+                             port=args.tune_port or cfg.get("ui.tune_port", 8089),
+                             source_desc=getattr(src, "mode_desc", args.source or
+                                                 cfg.get("camera.backend")))
         tuner.start()
 
     fps = RollingRate()

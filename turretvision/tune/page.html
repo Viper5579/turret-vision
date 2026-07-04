@@ -70,6 +70,14 @@
     border-radius: 99px; backdrop-filter: blur(4px);
   }
   .live .dot { width: 6px; height: 6px; background: var(--accent); }
+  .mode {
+    position: absolute; bottom: 12px; left: 12px;
+    background: rgba(20,20,19,.72); color: #FAF9F5;
+    font-size: 11px; letter-spacing: .04em; padding: 4px 10px;
+    border-radius: 99px; backdrop-filter: blur(4px);
+    font-variant-numeric: tabular-nums;
+  }
+  .mode:empty { display: none; }
 
   .statbar {
     display: grid; grid-template-columns: repeat(4, 1fr);
@@ -165,6 +173,21 @@
     background: var(--paper); border: 2px solid var(--accent);
   }
 
+  .switch { position: relative; margin-left: auto; width: 40px; height: 22px; flex: none; }
+  .switch input { opacity: 0; width: 100%; height: 100%; position: absolute; cursor: pointer; margin: 0; }
+  .switch .knob {
+    position: absolute; inset: 0; border-radius: 99px;
+    background: var(--border); transition: background .18s; pointer-events: none;
+  }
+  .switch .knob::after {
+    content: ""; position: absolute; top: 3px; left: 3px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--paper); box-shadow: 0 1px 3px rgba(31,30,29,.25);
+    transition: transform .18s;
+  }
+  .switch input:checked + .knob { background: var(--accent); }
+  .switch input:checked + .knob::after { transform: translateX(18px); }
+
   #toast {
     position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 20px);
     background: #141413; color: var(--ivory);
@@ -192,6 +215,7 @@
       <div class="videowrap">
         <img id="stream" src="/stream.mjpg" alt="live pipeline view">
         <span class="live"><span class="dot"></span>LIVE</span>
+        <span class="mode" id="mode"></span>
       </div>
       <div class="statbar">
         <div class="stat"><div class="k">Pipeline</div><div class="v"><span id="fps">–</span> <small>fps</small></div></div>
@@ -277,6 +301,28 @@ function buildControls(params) {
       row1.className = "row1";
       const label = document.createElement("label");
       label.textContent = spec.label;
+
+      if (spec.kind === "toggle") {
+        const sw = document.createElement("label");
+        sw.className = "switch";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = spec.value == spec.on;
+        const knob = document.createElement("span");
+        knob.className = "knob";
+        sw.append(cb, knob);
+        cb.addEventListener("change", () =>
+          sendParam(spec.key, cb.checked ? spec.on : spec.off));
+        row1.append(label, sw);
+        const help = document.createElement("div");
+        help.className = "help";
+        help.textContent = spec.help;
+        wrap.append(row1, help);
+        g.appendChild(wrap);
+        controls.set(spec.key, { toggle: cb, spec });
+        continue;
+      }
+
       const box = document.createElement("input");
       box.className = "val";
       box.inputMode = "decimal";
@@ -320,6 +366,7 @@ function refreshControlValues(params) {
   for (const p of params) {
     const c = controls.get(p.key);
     if (!c) continue;
+    if (c.toggle) { c.toggle.checked = p.value == c.spec.on; continue; }
     c.slider.value = p.value;
     c.box.value = fmt(c.spec, p.value);
     setFill(c.slider);
@@ -366,6 +413,7 @@ async function poll() {
     const r = await fetch("/api/state");
     const data = await r.json();
     if (!controls.size) buildControls(data.params);
+    $("mode").textContent = data.source || "";
     updateStats(data.stats, data.conf_history);
     lastStateAt = Date.now();
   } catch (e) { /* handled by the staleness check */ }

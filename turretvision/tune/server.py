@@ -32,9 +32,11 @@ BOUNDARY = "turretvision-frame"
 
 class TuningServer:
     def __init__(self, registry: ParamRegistry, config_path: str, port: int = 8089,
-                 jpeg_quality: int = 80, max_stream_fps: float = 20.0):
+                 jpeg_quality: int = 80, max_stream_fps: float = 20.0,
+                 source_desc: str = ""):
         self._registry = registry
         self._config_path = config_path
+        self._source_desc = source_desc
         self._quality = int(jpeg_quality)
         self._min_frame_dt = 1.0 / max_stream_fps
         self._cond = threading.Condition()
@@ -91,7 +93,7 @@ class TuningServer:
             stats = dict(self._stats)
             hist = list(self._conf_hist)
         return json.dumps({"params": self._registry.describe(), "stats": stats,
-                           "conf_history": hist}).encode()
+                           "conf_history": hist, "source": self._source_desc}).encode()
 
     def set_param(self, key: str, value: Any) -> Any:
         return self._registry.queue(key, value)

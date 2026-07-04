@@ -10,6 +10,11 @@ camera:
   fourcc: MJPG
   replay_path: null        # video file for backend=replay
   replay_realtime: true    # pace replay at recorded fps (false = as fast as possible)
+  # UVC driver controls applied via v4l2-ctl at startup (name: value), e.g.
+  # locking exposure/WB to manual so frame_diff doesn't see AE/AWB hunting as
+  # motion. The tuning UI's Camera section writes these on Save (to local.yaml).
+  # Empty = leave the driver as-is.
+  v4l2_ctrls: {}
 
 calibration:
   intrinsics_file: config/camera_intrinsics.yaml   # optional until Phase 4

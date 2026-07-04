@@ -25,9 +25,19 @@ class PixelAngleMapper:
                  fallback_hfov_deg: float = 70.0,
                  boresight_yaw_deg: float = 0.0,
                  boresight_pitch_deg: float = 0.0,
+                 boresight_file: str | None = None,
                  undistort_points: bool = True):
         self._w, self._h = width, height
         self._bs_yaw, self._bs_pitch = boresight_yaw_deg, boresight_pitch_deg
+        bs = Path(boresight_file) if boresight_file else None
+        if bs and bs.exists():
+            # tools/calibrate_boresight.py output stacks ON TOP of any manual
+            # config offsets (which default to 0 and normally stay there).
+            data = yaml.safe_load(bs.read_text()) or {}
+            self._bs_yaw += float(data.get("boresight_yaw_deg", 0.0))
+            self._bs_pitch += float(data.get("boresight_pitch_deg", 0.0))
+            print(f"[calib] boresight offsets loaded from {bs}: "
+                  f"yaw {self._bs_yaw:+.2f} pitch {self._bs_pitch:+.2f} deg")
         self._K: np.ndarray | None = None
         self._D: np.ndarray | None = None
         self._undistort = undistort_points
@@ -77,3 +87,17 @@ class PixelAngleMapper:
     def deg_per_px(self) -> float:
         """Approx scale at image center (used by ego-motion comp later)."""
         return math.degrees(1.0 / self._fx)
+
+    @property
+    def focal_px(self) -> float:
+        """fx (calibrated or FOV-fallback) — ranging.known_size consumes this."""
+        return self._fx
+
+    @property
+    def camera_matrix(self) -> np.ndarray | None:
+        """3x3 K when calibrated, else None (aruco_pose ranging requires it)."""
+        return self._K
+
+    @property
+    def dist_coeffs(self) -> np.ndarray | None:
+        return self._D

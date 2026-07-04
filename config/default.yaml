@@ -31,7 +31,8 @@ camera:
     backlight_compensation: 0
 
 calibration:
-  intrinsics_file: config/camera_intrinsics.yaml   # optional until Phase 4
+  intrinsics_file: config/camera_intrinsics.yaml   # tools/calibrate_camera.py writes this
+  boresight_file: config/boresight.yaml            # tools/calibrate_boresight.py writes this
   # Fallback when no intrinsics file exists yet: approximate focal length from
   # horizontal FOV. WHY: pixel->angle math must work on day one; a datasheet FOV
   # gives ~5% angle error, which is fine until the ChArUco calibration replaces it.
@@ -56,6 +57,23 @@ detection:
     hsv_low: [5, 120, 120]
     hsv_high: [25, 255, 255]
     min_area_px: 60
+
+ranging:
+  mode: fixed              # fixed | known_size | aruco_pose
+                           # fixed      = configured constant (bring-up / indoor default)
+                           # known_size = apparent bbox size + focal length (needs target_size_m)
+                           # aruco_pose = exact solvePnP range off an ArUco marker
+                           #              (needs intrinsics + detection.mode: aruco)
+  fixed_distance_m: 4.0
+  target_size_m: 0.30      # paper-airplane wingspan; known_size only
+
+lead:
+  enabled: false           # turn on once ranging gives sane numbers; overlay
+                           # then shows the aim point offset from the target
+  projectile_speed_mps: 50.0
+  drag_model: none         # placeholder by design (D7): measure muzzle velocity first
+  gravity_comp: true
+  max_lead_deg: 15.0       # bigger computed leads mean bad inputs, not real leads
 
 tracking:
   filter: alpha_beta

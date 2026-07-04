@@ -14,6 +14,9 @@ class Detection:
     bbox: tuple[int, int, int, int]  # x, y, w, h
     kind: str
     t: float
+    # ArUco only: the 4 marker corner pixels, ordered as detected. Carried so
+    # ranging/aruco_pose can solvePnP the exact pose instead of re-detecting.
+    corners: list[tuple[float, float]] | None = None
 
 
 class Detector(ABC):

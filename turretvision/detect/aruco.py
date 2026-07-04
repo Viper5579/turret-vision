@@ -36,5 +36,6 @@ class ArucoDetector(Detector):
             dets.append(Detection(cx=float(cx), cy=float(cy),
                                   area=float((x1 - x0) * (y1 - y0)),
                                   bbox=(int(x0), int(y0), int(x1 - x0), int(y1 - y0)),
-                                  kind="aruco", t=frame.t))
+                                  kind="aruco", t=frame.t,
+                                  corners=[(float(px), float(py)) for px, py in pts]))
         return dets

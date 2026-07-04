@@ -22,7 +22,11 @@ findings, and pick-up commands.
       MockLink (simulated turret w/ firmware behaviors) + link_monitor +
       sim_target; loopback serial test passes over a pty, sim_target passes
       all exit criteria with zero wire errors
-- [ ] Phase 4 — calibration tools, ranging, lead prediction
+- [x] Phase 4 (code) — ChArUco intrinsics + boresight calibration tools,
+      ranging (fixed / known_size / aruco_pose), constant-velocity lead
+      predictor with gravity drop; lead point renders on the overlay.
+      Hardware validation (range error <15% on ArUco at 2/4/6 m with a tape
+      measure) pending — see STATUS.md checklist
 - [ ] Phase 4.5 — ego-motion compensated frame differencing
 - [ ] Phase 5 — replay regression harness, docs polish
 
@@ -70,6 +74,25 @@ python -m turretvision.main --source synthetic --headless --max-frames 300
 python -m turretvision.main --source replay --replay logs/run1.mp4
 ```
 
+## Calibration (Phase 4)
+```bash
+# 1. Intrinsics (kills the ~5% FOV-fallback angle error):
+python tools/calibrate_camera.py --print-board    # print board.png at 100% scale
+python tools/calibrate_camera.py --square-mm 35   # pass the MEASURED square size
+#    move the board around until 20 views auto-capture; accept if error < 0.5 px
+
+# 2. Boresight (after a launcher axis stand-in exists — laser pointer works):
+#    aim the launcher axis at a printed ArUco marker, then:
+python tools/calibrate_boresight.py --range 4.0
+
+# 3. Range validation (the Phase 4 exit criterion):
+#    detection.mode: aruco + ranging.mode: aruco_pose in config, marker at
+#    tape-measured 2/4/6 m — overlay shows "rng X.XXm (aruco_pose)"; <15% error.
+```
+Ranging mode and the lead predictor are config (`ranging:`, `lead:`); flip
+`lead.enabled: true` once ranging is sane and the overlay draws the aim point
+offset ahead of the target.
+
 ## Turret link (Phase 3)
 `link.backend` in the config selects the turret connection: `console`
 (default; human-readable prints, no telemetry), `mock` (simulated turret
@@ -109,8 +132,9 @@ the local cv2 window, and the port comes from `ui.tune_port` or `--tune-port`.
 
 ## Verify
 ```bash
-python -m pytest -q      # 47 tests: filters/geometry/tracker, protocol (byte-exact
-                         # + fuzz), mock turret, serial loopback (pty), end-to-end
+python -m pytest -q      # 64 tests: filters/geometry/tracker, protocol (byte-exact
+                         # + fuzz), mock turret, serial loopback (pty), calibration
+                         # (synthetic known-camera), ranging, lead, end-to-end
 ruff check .
 ```
 

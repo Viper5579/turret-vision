@@ -16,7 +16,9 @@ class Overlay:
     def render(self, img: np.ndarray, track: TrackState | None,
                az_el: tuple[float, float] | None,
                fps: float, stage_ms: dict[str, float],
-               detections: list | None = None) -> np.ndarray:
+               detections: list | None = None,
+               lead_px: tuple[float, float] | None = None,
+               range_est=None) -> np.ndarray:
         out = img.copy()
         h, w = out.shape[:2]
         cv2.drawMarker(out, (w // 2, h // 2), (128, 128, 128),
@@ -44,6 +46,17 @@ class Overlay:
             if az_el:
                 cv2.putText(out, f"az {az_el[0]:+.2f}  el {az_el[1]:+.2f} deg",
                             (p[0] + 16, p[1] + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 1)
+            if range_est is not None:
+                cv2.putText(out, f"rng {range_est.dist_m:.2f}m ({range_est.method})",
+                            (p[0] + 16, p[1] + 28), cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 1)
+            if lead_px is not None:
+                # WHY a distinct mark: "where the turret is told to aim" vs
+                # "where the target is" is the whole point of lead — seeing
+                # both is how a bad lead solve is caught by eye.
+                lp = (int(lead_px[0]), int(lead_px[1]))
+                if 0 <= lp[0] < w and 0 <= lp[1] < h:
+                    cv2.line(out, p, lp, (255, 64, 200), 1, cv2.LINE_AA)
+                    cv2.drawMarker(out, lp, (255, 64, 200), cv2.MARKER_TILTED_CROSS, 16, 2)
             if self._draw_trail:
                 self._trail.append(p)
                 self._trail = self._trail[-self._trail_len:]

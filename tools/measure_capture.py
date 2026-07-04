@@ -113,6 +113,7 @@ decode_ms = (1000.0 / effective - 1000.0 / delivery) if delivery > 0 and effecti
 print(f"implied decode cost: ~{max(decode_ms, 0):.1f} ms/frame")
 
 # ---- optional: the hardware-decode path --------------------------------------
+gst_fps = None
 if args.gst:
     for kind, decode in (("hw (nvv4l2decoder)", None), ("sw (jpegdec)", SW_DECODE)):
         pipe = (build_pipeline(args.device, args.width, args.height, args.fps)
@@ -129,7 +130,8 @@ if args.gst:
         while time.monotonic() - t0 < args.seconds:
             if gcap.read()[0]:
                 n += 1
-        print(f"gstreamer {kind}: {n} frames -> {n / (time.monotonic() - t0):.1f} fps")
+        gst_fps = n / (time.monotonic() - t0)
+        print(f"gstreamer {kind}: {n} frames -> {gst_fps:.1f} fps")
         gcap.release()
         break  # hw worked; no need to test the fallback
 
@@ -139,15 +141,23 @@ issues = 0
 if delivery < args.fps * 0.9:
     issues += 1
     frame_ms = 1000.0 / delivery if delivery > 0 else float("inf")
-    print(f"ISSUE {issues}: camera delivers {delivery:.0f} fps ({frame_ms:.1f} ms/frame), "
-          f"below the {args.fps} the mode promises.")
-    if exposure_ms and abs(frame_ms - exposure_ms) / frame_ms < 0.35:
+    print(f"ISSUE {issues}: cv2's V4L2 path delivers {delivery:.0f} fps ({frame_ms:.1f} "
+          f"ms/frame), below the {args.fps} the mode promises.")
+    if gst_fps and gst_fps >= args.fps * 0.9:
+        # Measured on the OV9782/Orin Nano: cv2-V4L2 grab topped out at 57fps
+        # while GStreamer pulled 102 from the SAME camera. The backend, not the
+        # hardware, was the ceiling.
+        print(f"  -> but GStreamer reads {gst_fps:.0f} fps from the same camera, so the "
+              f"camera/USB are fine — the cv2 V4L2 backend itself is the limit. "
+              f"Use camera.backend: gstreamer.")
+    elif exposure_ms and abs(frame_ms - exposure_ms) / frame_ms < 0.35:
         print(f"  -> delivery matches the current {exposure_ms:.1f} ms exposure almost "
               f"exactly: EXPOSURE is the cap. Rerun with --exposure 80, and make it "
               f"permanent via the tuning UI's Camera section + Save.")
     else:
-        print("  -> exposure doesn't explain it: check format fallback above, "
-              "tools/enumerate_camera.py for real modes, and the USB port/hub.")
+        print("  -> exposure doesn't explain it. Rerun with --gst to check whether the "
+              "camera or the cv2 V4L2 backend is the limit; also check format fallback "
+              "above, tools/enumerate_camera.py for real modes, and the USB port/hub.")
 if decode_ms > 4.0:
     issues += 1
     print(f"ISSUE {issues}: software JPEG decode costs ~{decode_ms:.1f} ms/frame "

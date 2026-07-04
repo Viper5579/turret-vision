@@ -124,15 +124,18 @@ ruff check .
      startup (`[v4l2] requested MJPG ... -> negotiated YUYV ...` plus a
      warning on mismatch) — believe that line, not the config. Pick a mode
      `tools/enumerate_camera.py` actually lists.
-  2. **Auto-exposure choosing a long integration time.** The sensor physically
-     cannot exceed `1/exposure_time`; indoors AE happily lands on ~30ms → ~33fps
-     no matter what the mode says. Lock manual exposure (previous bullet, or
-     the tuning UI's Camera section) and keep `exposure_time_absolute` under
-     the frame period.
+  2. **Exposure time capping the sensor** (auto OR a stale manual value — UVC
+     controls reset on replug/reboot). The sensor physically cannot exceed
+     `1/exposure_time`; the OV9782's default 15.7ms caps at ~60fps, indoors AE
+     lands near 30ms → ~33fps. `measure_capture.py` prints the current
+     controls and says outright when delivery matches the exposure math;
+     `--exposure 80` tests the fix in one command. Make it permanent via the
+     tuning UI's Camera section + **Save** (re-applied every startup).
   3. **Software JPEG decode.** Decoding 1280x800 MJPG on the CPU costs
      ~10–17ms per frame — a ~35–60fps ceiling even when the camera delivers
      100. `python tools/measure_capture.py /dev/video0` measures delivery and
-     decode separately and prints a verdict. If decode is the bottleneck, set
+     decode separately (add `--gst` to benchmark the hardware-decode path
+     too) and reports every issue it finds. If decode is the bottleneck, set
      `camera.backend: gstreamer` — on the Jetson that routes decode through
      the hardware block (`nvv4l2decoder`) instead of the CPU. This needs the
      GStreamer-enabled system OpenCV (yet another reason never to let pip

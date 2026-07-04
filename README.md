@@ -10,8 +10,14 @@ is the primary detector, commands are absolute idempotent setpoints, the protoco
 is bidirectional from v1, and everything runs with zero hardware attached.
 
 ## Status
-- [x] Phase 2 — capture (v4l2/replay/synthetic), detectors (frame_diff/aruco/color_mask),
-      alpha-beta tracker, pixel→angle geometry, overlay, config, console output
+See **STATUS.md** for the detailed current state, the fps investigation
+findings, and pick-up commands.
+- [x] Phase 2 — capture (v4l2/gstreamer/replay/synthetic), detectors
+      (frame_diff/aruco/color_mask), alpha-beta tracker, pixel→angle geometry,
+      overlay, config, console output
+- [x] Phase 2.5 — browser tuning UI (pipeline + camera controls), config
+      overlay persistence, capture diagnostics; verified on hardware at
+      79–91 fps via Jetson hw JPEG decode
 - [ ] Phase 3 — binary protocol + pyserial link + MockLink + simulators
 - [ ] Phase 4 — calibration tools, ranging, lead prediction
 - [ ] Phase 4.5 — ego-motion compensated frame differencing

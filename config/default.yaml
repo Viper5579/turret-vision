@@ -2,7 +2,9 @@
 # shouldn't require re-reading code, it lives here.
 
 camera:
-  backend: v4l2            # v4l2 | replay | synthetic
+  backend: v4l2            # v4l2 | gstreamer | replay | synthetic
+                           # gstreamer = Jetson hardware JPEG decode (nvv4l2decoder);
+                           # use it when measure_capture.py says decode is the bottleneck
   device: /dev/video0
   width: 1280
   height: 800
@@ -10,6 +12,8 @@ camera:
   fourcc: MJPG
   replay_path: null        # video file for backend=replay
   replay_realtime: true    # pace replay at recorded fps (false = as fast as possible)
+  gst_pipeline: null       # backend=gstreamer: full custom pipeline string override
+                           # (must end in an appsink producing BGR)
   # UVC driver controls applied via v4l2-ctl at startup (name: value), e.g.
   # locking exposure/WB to manual so frame_diff doesn't see AE/AWB hunting as
   # motion. The tuning UI's Camera section writes these on Save (to local.yaml).

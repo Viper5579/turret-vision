@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .calib.geometry import PixelAngleMapper
 from .capture.base import FrameSource
+from .capture.gstreamer import GstCamera
 from .capture.replay import ReplaySource
 from .capture.synthetic import SyntheticSource
 from .capture.v4l2 import V4L2Camera
@@ -41,6 +42,11 @@ def build_source(cfg: Config, args) -> FrameSource:
                           cfg.get("camera.height"), cfg.get("camera.fps"),
                           cfg.get("camera.fourcc", "MJPG"),
                           ctrls=cfg.get("camera.v4l2_ctrls", None) or {})
+    if backend == "gstreamer":
+        return GstCamera(cfg.get("camera.device"), cfg.get("camera.width"),
+                         cfg.get("camera.height"), cfg.get("camera.fps"),
+                         ctrls=cfg.get("camera.v4l2_ctrls", None) or {},
+                         pipeline=cfg.get("camera.gst_pipeline", None))
     if backend == "replay":
         path = args.replay or cfg.get("camera.replay_path")
         if not path:
@@ -69,8 +75,8 @@ def build_link(cfg: Config) -> TurretLink:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="turret vision pipeline")
     ap.add_argument("--config", default="config/default.yaml")
-    ap.add_argument("--source", choices=["v4l2", "replay", "synthetic"], default=None,
-                    help="override camera.backend")
+    ap.add_argument("--source", choices=["v4l2", "gstreamer", "replay", "synthetic"],
+                    default=None, help="override camera.backend")
     ap.add_argument("--replay", default=None, help="video file for --source replay")
     ap.add_argument("--headless", action="store_true", help="no window (SSH/tests)")
     ap.add_argument("--max-frames", type=int, default=None)

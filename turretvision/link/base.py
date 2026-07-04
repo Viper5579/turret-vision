@@ -6,8 +6,10 @@ from dataclasses import dataclass
 
 @dataclass
 class AimOutput:
-    """What Phase 2 hands the link each frame. Phase 3 packs this into the wire
-    format (AIM packet, SPEC 5); until then links render it however they like."""
+    """What the pipeline hands the link each frame. az/el are the ABSOLUTE
+    yaw/pitch setpoints in degrees (turret pose from telemetry + tracked error;
+    identical to the raw error when no telemetry exists, e.g. ConsoleLink).
+    Serial/mock links pack this into the AIM wire packet (SPEC 5)."""
     t: float
     valid: bool
     az_deg: float
@@ -16,6 +18,7 @@ class AimOutput:
     el_rate_dps: float
     confidence: float           # 0..1
     range_m: float | None = None
+    estop: bool = False         # in every packet on purpose: can't be lost
 
 
 @dataclass
@@ -24,8 +27,16 @@ class Telemetry:
     yaw_deg: float
     pitch_deg: float
     yaw_rate_dps: float
-    status: int
+    status: int                 # TELEM status bits, see link/protocol.py
     t_rx: float
+
+    @property
+    def homed(self) -> bool:
+        return bool(self.status & 0x01)
+
+    @property
+    def estopped(self) -> bool:
+        return bool(self.status & 0x10)
 
 
 class TurretLink(ABC):

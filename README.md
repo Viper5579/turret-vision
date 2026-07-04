@@ -18,7 +18,10 @@ findings, and pick-up commands.
 - [x] Phase 2.5 — browser tuning UI (pipeline + camera controls), config
       overlay persistence, capture diagnostics; verified on hardware at
       79–91 fps via Jetson hw JPEG decode
-- [ ] Phase 3 — binary protocol + pyserial link + MockLink + simulators
+- [x] Phase 3 — binary protocol (framing/CRC16/pack/unpack) + SerialLink +
+      MockLink (simulated turret w/ firmware behaviors) + link_monitor +
+      sim_target; loopback serial test passes over a pty, sim_target passes
+      all exit criteria with zero wire errors
 - [ ] Phase 4 — calibration tools, ranging, lead prediction
 - [ ] Phase 4.5 — ego-motion compensated frame differencing
 - [ ] Phase 5 — replay regression harness, docs polish
@@ -66,6 +69,22 @@ python -m turretvision.main --source synthetic --headless --max-frames 300
 # Replay a recording:
 python -m turretvision.main --source replay --replay logs/run1.mp4
 ```
+
+## Turret link (Phase 3)
+`link.backend` in the config selects the turret connection: `console`
+(default; human-readable prints, no telemetry), `mock` (simulated turret
+dynamics + telemetry — the full closed loop with zero hardware), or `serial`
+(real ESP32 over pyserial; heartbeats at `link.aim_rate_hz` even with no
+target, so the firmware can tell "no target" from "link dead").
+
+```bash
+python tools/sim_target.py                    # full pipeline vs MockLink, scored,
+                                              # exit code 0 = Phase 3 criteria pass
+python tools/link_monitor.py /dev/ttyUSB0     # decode live packet traffic
+```
+The wire format reference implementation is `turretvision/link/protocol.py`;
+`firmware/PROTOCOL.md` tells the future ESP32 firmware exactly what to match
+(including MockLink's behavior model and the rate-feedforward finding).
 `q` quits the window. Per-frame state lands in `logs/state.csv` for plotting.
 
 ## Tuning UI (browser)
@@ -90,7 +109,8 @@ the local cv2 window, and the port comes from `ui.tune_port` or `--tune-port`.
 
 ## Verify
 ```bash
-python -m pytest -q      # 14 tests: filters, geometry, tracker, end-to-end synthetic
+python -m pytest -q      # 47 tests: filters/geometry/tracker, protocol (byte-exact
+                         # + fuzz), mock turret, serial loopback (pty), end-to-end
 ruff check .
 ```
 

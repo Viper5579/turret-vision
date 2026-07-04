@@ -4,14 +4,41 @@ Last updated: 2026-07-04 · Hardware: Jetson Orin Nano Super + Arducam OV9782 US
 
 ## Where we are
 
-**Phase 2 (vision pipeline) is complete and running on real hardware at
-79–91 fps**, up from the ~30 fps it started at. Phase 3 (binary protocol +
-serial link to the ESP32) has not started.
+**Phase 2 (vision pipeline) runs on real hardware at 79–91 fps** (up from
+~30), pending the two-check sign-off below. **Phase 3 (protocol + links) is
+code-complete and passing all its exit criteria** — byte-exact packet tests,
+2000-case corruption fuzz with zero CRC-accepted corrupt frames, a serial
+loopback test over a pty, and `tools/sim_target.py` driving the full pipeline
+against the simulated turret with zero wire errors.
 
 ```
-capture (GStreamer hw decode, 100fps) -> frame_diff -> alpha-beta tracker
-    -> pixel->angle -> console link          [tuned live via browser UI]
+capture (GStreamer hw decode) -> frame_diff (telemetry-gated) -> tracker
+  -> pixel->angle -> absolute setpoint (pose+error, clamped) -> link
+       console: prints | mock: simulated turret | serial: ESP32, 50Hz heartbeat
+                              ^--- telemetry (pose/rate/status) feeds back ---^
 ```
+
+## Phase 3: what got built
+
+- `link/protocol.py` — framing (AA 55 | LEN | TYPE | payload | CRC16),
+  CRC-16/CCITT-FALSE, AIM/TELEM pack/unpack, byte-at-a-time parser with
+  resync. This file is the reference for the ESP32 firmware.
+- `link/serial_link.py` — pyserial + IO thread; the pipeline never blocks on
+  a write. Heartbeats at `aim_rate_hz` even when silent/no-target (so
+  firmware can tell "no target" from "link dead"), min-filtered clock offset
+  for Phase 4.5 pose interpolation.
+- `link/mock_link.py` — simulated turret that behaves like the future
+  firmware: parses real AIM bytes, clamps to travel limits, honors e-stop,
+  enters safe-hold on link timeout, trapezoidal yaw + rate-limited pitch,
+  emits real TELEM bytes.
+- `main.py` — telemetry now closes the loop: turret rate feeds the
+  quasi-static detection gate, setpoints are absolute (pose + tracked error)
+  and clamped Jetson-side.
+- `tools/sim_target.py` (scored end-to-end run, exit code = pass/fail) and
+  `tools/link_monitor.py` (live packet decoder).
+- **Design finding worth keeping:** the AIM packet's rate feedforward field
+  cuts closed-loop tracking lag ~10x (mean 3.35° → 0.39° in sim). Recorded in
+  `firmware/PROTOCOL.md` so the firmware implements it, not just carries it.
 
 ## The fps investigation (why it was 30, how it got to ~90)
 
@@ -82,36 +109,31 @@ Exit criterion per SPEC §7: *"Live window tracks a thrown bright object."*
 
 Both pass → Phase 2 is formally complete.
 
-## Phase 3 prep: what hardware you need
-
-**None.** Per SPEC §7: *"Nothing before Phase 4.5 requires the ESP32 to
-exist."* Phase 3 is the binary protocol + SerialLink + **MockLink** (a fake
-turret in software) + `sim_target`; its exit criteria run entirely on the
-Jetson (byte-exact packet unit tests + a serial **loopback** test). Do NOT
-mount the camera/servo/stepper to the turret yet — that's Phase 4.5+
-territory (ego-motion work is when the turret actually slewing matters).
-
-Optional, only for the loopback test at the end of Phase 3: any USB-serial
-adapter with TX jumpered to RX (an ESP32 dev board on USB can serve as
-exactly that). Worth ordering if not on hand, but it doesn't block the
-protocol/MockLink work.
-
 ## Next up
 
 - [ ] Phase 2 sign-off checklist above (10 minutes with the tuning UI open)
-- [ ] **Phase 3**: protocol.py + SerialLink + MockLink + link_monitor +
-      sim_target (`firmware/PROTOCOL.md` has the wire format)
-- [ ] Phase 4: ChArUco intrinsics calibration (kills the ~5% angle error from
-      the FOV fallback), boresight, ranging, lead prediction — this is where
-      the physical turret build starts to matter
+- [ ] Optional Phase 3 hardware confirmation: the loopback test already
+      passes over a pty in CI; repeating it through a physical USB-serial
+      adapter (TX jumpered to RX, run `tools/link_monitor.py` on it) proves
+      the same bytes survive a real UART. An ESP32 dev board on USB works.
+      No turret mounting yet — that's Phase 4.5+ territory.
+- [ ] **Phase 4**: ChArUco intrinsics calibration (kills the ~5% angle error
+      from the FOV fallback), boresight, ranging (known-size + aruco_pose),
+      lead prediction — this is where the physical turret build starts to
+      matter
 - [ ] Phase 4.5: ego-motion compensated differencing (replaces the
-      quasi-static gate so detection works mid-slew)
+      quasi-static gate so detection works mid-slew); consumes the telemetry
+      + clock-offset infrastructure Phase 3 just built
+- [ ] ESP32 firmware, whenever the board arrives: implement against
+      `firmware/PROTOCOL.md` + `link/protocol.py`, and match MockLink's
+      behavior model (clamping, e-stop, safe-hold, rate feedforward)
 
 ## Pick-up commands
 
 ```bash
 python3 -m turretvision.main --tune --headless    # run + tune UI (defaults do the rest)
 #   -> http://<jetson-ip>:8089
+python3 tools/sim_target.py                       # Phase 3 exit criteria, scored
 python3 tools/measure_capture.py /dev/video0 --gst   # capture health check
-python3 -m pytest -q && python3 -m ruff check .      # 26 tests
+python3 -m pytest -q && python3 -m ruff check .      # 47 tests
 ```

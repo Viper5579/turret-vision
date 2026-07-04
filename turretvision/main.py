@@ -68,8 +68,18 @@ def build_link(cfg: Config) -> TurretLink:
     backend = cfg.get("link.backend")
     if backend == "console":
         return ConsoleLink(console_rate_hz=cfg.get("link.console_rate_hz", 5.0))
-    # mock | serial arrive in Phase 3; failing loudly beats silently printing.
-    sys.exit(f"link backend '{backend}' not implemented until Phase 3 (use 'console')")
+    if backend == "mock":
+        from .link.mock_link import MockLink
+        return MockLink(yaw_limits=(cfg.get("turret.yaw_min_deg", -170.0),
+                                    cfg.get("turret.yaw_max_deg", 170.0)),
+                        pitch_limits=(cfg.get("turret.pitch_min_deg", -10.0),
+                                      cfg.get("turret.pitch_max_deg", 60.0)),
+                        aim_timeout_s=cfg.get("link.telemetry_timeout_s", 0.5))
+    if backend == "serial":
+        from .link.serial_link import SerialLink
+        return SerialLink(cfg.get("link.port"), cfg.get("link.baud", 115200),
+                          aim_rate_hz=cfg.get("link.aim_rate_hz", 50))
+    sys.exit(f"unknown link backend: {backend} (console | mock | serial)")
 
 
 def main(argv=None) -> int:
@@ -111,6 +121,8 @@ def main(argv=None) -> int:
     )
     link = build_link(cfg)
     overlay = Overlay(cfg.get("ui.draw_trail", True), cfg.get("ui.trail_len", 32))
+    yaw_lim = (cfg.get("turret.yaw_min_deg", -170.0), cfg.get("turret.yaw_max_deg", 170.0))
+    pitch_lim = (cfg.get("turret.pitch_min_deg", -10.0), cfg.get("turret.pitch_max_deg", 60.0))
     # Holder (not a bare float) so the tuning UI can adjust it live; the loop
     # reads it fresh each frame either way.
     min_conf_ref = {"value": cfg.get("tracking.min_confidence_output")}
@@ -161,11 +173,19 @@ def main(argv=None) -> int:
             if tuner:
                 tuner.apply_pending()  # slider changes land here, pipeline-thread only
             timer.start()
+            # Telemetry first: the quasi-static gate (D1) needs the turret's
+            # actual rate BEFORE this frame's differencing, and the absolute
+            # setpoint (D2) is turret pose + tracked error.
+            telem = link.poll_telemetry()
+            if telem is not None:
+                detector.set_turret_rate(telem.yaw_rate_dps)
             dets = detector.detect(frame)
             timer.mark("detect")
             track = tracker.step(dets, frame.t)
             timer.mark("track")
 
+            turret_yaw = telem.yaw_deg if telem else 0.0
+            turret_pitch = telem.pitch_deg if telem else 0.0
             if track is not None:
                 az, el = mapper.pixel_to_angles(track.x, track.y)
                 # Angular rates via the local scale. WHY not per-axis exact math:
@@ -174,10 +194,16 @@ def main(argv=None) -> int:
                 az_rate = track.vx * mapper.deg_per_px
                 el_rate = -track.vy * mapper.deg_per_px
                 valid = track.confidence >= min_conf_ref["value"]
-                aim = AimOutput(frame.t, valid, az, el, az_rate, el_rate, track.confidence)
+                # Absolute setpoint, clamped Jetson-side too (defense in depth:
+                # the firmware clamps as well, D2) — never send an illegal command.
+                yaw_set = min(max(turret_yaw + az, yaw_lim[0]), yaw_lim[1])
+                pitch_set = min(max(turret_pitch + el, pitch_lim[0]), pitch_lim[1])
+                aim = AimOutput(frame.t, valid, yaw_set, pitch_set,
+                                az_rate, el_rate, track.confidence)
             else:
                 az = el = az_rate = el_rate = 0.0
-                aim = AimOutput(frame.t, False, 0.0, 0.0, 0.0, 0.0, 0.0)
+                aim = AimOutput(frame.t, False, turret_yaw, turret_pitch,
+                                0.0, 0.0, 0.0)
             link.send_aim(aim)
             timer.mark("link")
 

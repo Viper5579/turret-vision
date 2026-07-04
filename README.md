@@ -68,12 +68,19 @@ python -m turretvision.main --tune --headless     # on the Jetson, over SSH
 ```
 Then open `http://<jetson-ip>:8089` from any machine on the LAN. You get the
 live camera view (with raw detection boxes and the track overlay), pipeline
-stats, and sliders for every detector/tracker knob. Changes apply to the
-running pipeline instantly; **Save to config** persists them to
-`config/local.yaml`, which is auto-merged over `default.yaml` on every
-subsequent run (tuned or not) and is gitignored. **Revert** restores the
-values the session started with. `--tune` also works alongside the local
-cv2 window, and the port comes from `ui.tune_port` or `--tune-port`.
+stats, the negotiated camera mode, and sliders for every detector/tracker
+knob. On a real camera there is also a **Camera (UVC driver)** section —
+auto-exposure/auto-WB toggles, exposure time, gain, WB temperature — driven
+through `v4l2-ctl`, so the exposure-locking dance from Troubleshooting is
+two switches and a slider instead of five shell commands.
+
+Changes apply to the running pipeline instantly; **Save to config** persists
+them to `config/local.yaml`, which is auto-merged over `default.yaml` on
+every subsequent run (tuned or not) and is gitignored. Saved camera controls
+land under `camera.v4l2_ctrls` and are re-applied to the driver at every
+startup (UVC settings don't survive replug on their own). **Revert**
+restores the values the session started with. `--tune` also works alongside
+the local cv2 window, and the port comes from `ui.tune_port` or `--tune-port`.
 
 ## Verify
 ```bash
@@ -110,7 +117,21 @@ ruff check .
   (manual controls should no longer show `flags=inactive`).
 - **Black window / no camera**: check `v4l2-ctl --list-devices`; the OV9782 must be
   the device in `camera.device`.
-- **fps far below requested**: the UVC firmware fell back to another mode — this is
-  why `tools/enumerate_camera.py` exists; pick a listed mode exactly.
+- **fps far below requested** (e.g. ~30 or ~10 instead of 100): three suspects,
+  in the order to check them:
+  1. **Pixel format fallback.** The OV9782 does 100fps only in MJPG; raw YUYV
+     at 1280x800 is ~10fps. The pipeline now prints the NEGOTIATED format at
+     startup (`[v4l2] requested MJPG ... -> negotiated YUYV ...` plus a
+     warning on mismatch) — believe that line, not the config. Pick a mode
+     `tools/enumerate_camera.py` actually lists.
+  2. **Auto-exposure choosing a long integration time.** The sensor physically
+     cannot exceed `1/exposure_time`; indoors AE happily lands on ~30ms → ~33fps
+     no matter what the mode says. Lock manual exposure (previous bullet, or
+     the tuning UI's Camera section) and keep `exposure_time_absolute` under
+     the frame period.
+  3. **The Python loop itself.** Rule the camera in or out with
+     `python tools/measure_capture.py /dev/video0` — a bare grab-only loop.
+     Camera fast + pipeline slow = processing bottleneck; profile that
+     separately instead of touching camera settings.
 - **`[warn] no intrinsics file`**: expected until Phase 4 calibration; angles carry
   ~5% scale error from the FOV fallback, fine for bring-up.

@@ -23,13 +23,19 @@ class ParamSpec:
     vmin: float
     vmax: float
     step: float
-    kind: str                 # "int" | "float"
+    kind: str                 # "int" | "float" | "toggle"
     help: str
     getter: Callable[[], Any]
     setter: Callable[[Any], None]
+    # For "toggle": the raw values the two switch states map to. Not always
+    # 1/0 — UVC auto_exposure is a menu where 3=auto and 1=manual.
+    on_value: int = 1
+    off_value: int = 0
 
     def coerce(self, value: Any) -> Any:
         v = float(value)
+        if self.kind == "toggle":
+            return self.off_value if v == float(self.off_value) else self.on_value
         v = min(max(v, self.vmin), self.vmax)
         return int(round(v)) if self.kind == "int" else round(v, 6)
 
@@ -69,7 +75,8 @@ class ParamRegistry:
     def describe(self) -> list[dict]:
         return [{"key": s.key, "label": s.label, "group": s.group,
                  "min": s.vmin, "max": s.vmax, "step": s.step, "kind": s.kind,
-                 "help": s.help, "value": s.getter()} for s in self.specs.values()]
+                 "help": s.help, "value": s.getter(),
+                 "on": s.on_value, "off": s.off_value} for s in self.specs.values()]
 
 
 def _attr(obj: Any, name: str) -> tuple[Callable[[], Any], Callable[[Any], None]]:
@@ -129,3 +136,59 @@ def build_registry(detector, filt, tracker, min_conf_ref: dict) -> ParamRegistry
                       lambda: min_conf_ref["value"],
                       lambda v: min_conf_ref.__setitem__("value", v)))
     return reg
+
+
+def add_camera_params(reg: ParamRegistry, cam) -> int:
+    """Expose UVC driver controls (uvc_ctrl.UvcControls) that this camera
+    actually reports. Keys live under camera.v4l2_ctrls so a Save persists the
+    RAW driver values, which V4L2Camera re-applies on every startup.
+
+    Returns the number of controls added.
+    """
+    grp = "Camera (UVC driver)"
+    added = 0
+
+    def _cam_attr(name):
+        return (lambda: cam.get(name)), (lambda v: cam.set(name, v))
+
+    def toggle(name, label, help_, on, off):
+        nonlocal added
+        if name not in cam.controls:
+            return
+        g, s = _cam_attr(name)
+        reg.add(ParamSpec(f"camera.v4l2_ctrls.{name}", label, grp,
+                          min(on, off), max(on, off), 1, "toggle", help_, g, s,
+                          on_value=on, off_value=off))
+        added += 1
+
+    def slider(name, label, help_, max_cap=None):
+        nonlocal added
+        c = cam.controls.get(name)
+        if not c or "min" not in c or "max" not in c:
+            return
+        vmax = min(c["max"], max_cap) if max_cap else c["max"]
+        g, s = _cam_attr(name)
+        reg.add(ParamSpec(f"camera.v4l2_ctrls.{name}", label, grp,
+                          c["min"], vmax, c.get("step", 1), "int", help_, g, s))
+        added += 1
+
+    # UVC auto_exposure is a menu: 1 = Manual Mode, 3 = Aperture Priority (auto).
+    toggle("auto_exposure", "Auto exposure",
+           "Turn OFF for tracking. AE hunting shifts global brightness (false "
+           "frame_diff motion) and long auto exposures cap fps below the mode rate.",
+           on=3, off=1)
+    # 5000 raw = 500ms — useless for tracking; cap the slider at a sane range.
+    slider("exposure_time_absolute", "Exposure time",
+           "Units of 100 µs (80 = 8 ms). Must fit the frame period: at 100 fps "
+           "anything above ~100 caps the frame rate itself.", max_cap=500)
+    slider("gain", "Gain",
+           "Sensor gain. Raise THIS (not exposure) if the image is too dark at "
+           "a short exposure; noise is cheaper than motion blur here.")
+    toggle("white_balance_automatic", "Auto white balance",
+           "Turn OFF for tracking; AWB hunting shifts colors globally between "
+           "frames, which frame_diff reads as motion.", on=1, off=0)
+    slider("white_balance_temperature", "WB temperature (K)",
+           "Fixed color temperature, applies once auto WB is off.")
+    slider("backlight_compensation", "Backlight comp",
+           "Leave at 0 for tracking; it fights the manual exposure lock.")
+    return added

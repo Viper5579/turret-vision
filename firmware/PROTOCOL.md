@@ -14,5 +14,14 @@ Authoritative definition lives in SPEC.md section 5. Summary for the firmware au
 - Firmware MUST: clamp setpoints to travel limits (never trust the wire), stop motion
   while e-stop bit set, enter safe-hold if no valid AIM frame for a timeout (link-dead
   is distinguishable from no-target BECAUSE the Jetson heartbeats target_valid=0 packets).
-- Jetson-side pack/unpack reference implementation arrives in Phase 3 as
-  turretvision/link/protocol.py -- port the constants from there, do not retype them.
+- Jetson-side pack/unpack reference implementation: turretvision/link/protocol.py.
+  Port the constants from there, do not retype them. tests/test_protocol.py contains
+  byte-exact frames to validate against, and tools/link_monitor.py decodes live traffic.
+- USE the yaw_rate feedforward, don't ignore it: add it to your motion profile's
+  desired velocity (v_des = trapezoid(err) + ff, clamped to vmax). Chasing a target
+  moving at constant v with position-error-only control carries a permanent
+  v^2/(2*accel) lag; MockLink measured mean tracking error 3.35 deg -> 0.39 deg
+  from this one change (tools/sim_target.py).
+- A reference "firmware" behavior model (clamping, e-stop, heartbeat handling,
+  link-dead safe-hold, trapezoidal yaw / rate-limited pitch) lives in
+  turretvision/link/mock_link.py with tests in tests/test_mock_link.py -- match it.

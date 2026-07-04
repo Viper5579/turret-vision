@@ -65,11 +65,24 @@ tracking:
   gate_px: 120             # max px distance for detection<->track association
   min_confidence_output: 0.4  # below this the link sends target_valid=false
 
+# Travel limits, enforced BOTH Jetson-side (never send an illegal command) and
+# firmware-side (never trust the wire) — defense in depth, SPEC D2.
+turret:
+  yaw_min_deg: -170.0
+  yaw_max_deg: 170.0
+  pitch_min_deg: -10.0
+  pitch_max_deg: 60.0
+
 link:
-  backend: console         # console | mock | serial (mock/serial arrive in Phase 3)
+  backend: console         # console | mock | serial
+                           # console = human-readable prints (no telemetry)
+                           # mock    = simulated turret dynamics + telemetry (full
+                           #           closed loop with zero hardware, SPEC D4)
+                           # serial  = real ESP32 over pyserial
   port: /dev/ttyUSB0
   baud: 115200
-  aim_rate_hz: 50
+  aim_rate_hz: 50          # wire rate for AIM packets/heartbeats (serial backend)
+  telemetry_timeout_s: 0.5 # no AIM for this long -> firmware/mock enters safe-hold
   console_rate_hz: 5       # human-readable print rate (full rate would flood the terminal)
 
 logging:

@@ -53,36 +53,64 @@ for Phase 2/3, revisit only if it ever matters for intercept quality).
 - Test suite grew 14 → 26 (tuning stack, UVC control layer, gstreamer
   pipeline construction).
 
-## To make the current state permanent (2 minutes, one-time)
+## Configuration: nothing to edit by hand
 
-1. Make gstreamer the default backend — add to `config/local.yaml`:
-   ```yaml
-   camera:
-     backend: gstreamer
-   ```
-   (until then, pass `--source gstreamer` on each run)
-2. Lock the camera exposure permanently: run with `--tune`, open the UI,
-   Camera section → Auto exposure OFF, Exposure time 80, Auto WB OFF →
-   **Save to config**. Saved controls re-apply at every startup from then on.
+The hardware-proven values are now the committed defaults in
+`config/default.yaml` — a plain `git pull` brings them, and
+`python3 -m turretvision.main --tune --headless` (no flags) runs the full
+working setup: gstreamer backend + manual exposure 8ms + WB locked, applied
+to the camera at every startup.
+
+`config/local.yaml` is only for machine/room-specific overrides (e.g. a
+different exposure for your lighting). It is **gitignored — `git pull` never
+touches or reverts it**. Two ways to write it: the tuning UI's **Save to
+config** button, or by hand (`nano config/local.yaml`, same YAML shape as
+default.yaml, only the keys you want to override).
+
+## Phase 2 sign-off checklist (the last bits — validation, not code)
+
+Exit criterion per SPEC §7: *"Live window tracks a thrown bright object."*
+
+- [ ] **Static-scene test**: camera at a static scene, nothing moving →
+      DETECTIONS stat in the tuning UI should sit at 0. If it fires, the
+      exposure/WB locks aren't holding (check the Camera section) before
+      touching any detector knob.
+- [ ] **Thrown-object test**: toss something bright across the frame → the
+      overlay locks on (TRACKING pill), az/el track it, conf near 1.
+- [ ] If the image is too dark at 8ms exposure: raise **Gain** in the UI,
+      not exposure, then Save.
+
+Both pass → Phase 2 is formally complete.
+
+## Phase 3 prep: what hardware you need
+
+**None.** Per SPEC §7: *"Nothing before Phase 4.5 requires the ESP32 to
+exist."* Phase 3 is the binary protocol + SerialLink + **MockLink** (a fake
+turret in software) + `sim_target`; its exit criteria run entirely on the
+Jetson (byte-exact packet unit tests + a serial **loopback** test). Do NOT
+mount the camera/servo/stepper to the turret yet — that's Phase 4.5+
+territory (ego-motion work is when the turret actually slewing matters).
+
+Optional, only for the loopback test at the end of Phase 3: any USB-serial
+adapter with TX jumpered to RX (an ESP32 dev board on USB can serve as
+exactly that). Worth ordering if not on hand, but it doesn't block the
+protocol/MockLink work.
 
 ## Next up
 
-- [ ] **Static-target sanity test** (from the Phase 2 bring-up notes): point
-      the camera at a static scene with exposure/WB locked, confirm zero
-      detections fire, then a real motion-tracking test.
-- [ ] Iterate `exposure_time_absolute` against room lighting (80 = 8ms is a
-      starting point; raise gain, not exposure, if too dark).
-- [ ] **Phase 3**: binary protocol + pyserial link + MockLink + simulators
-      (`firmware/PROTOCOL.md` has the wire format).
+- [ ] Phase 2 sign-off checklist above (10 minutes with the tuning UI open)
+- [ ] **Phase 3**: protocol.py + SerialLink + MockLink + link_monitor +
+      sim_target (`firmware/PROTOCOL.md` has the wire format)
 - [ ] Phase 4: ChArUco intrinsics calibration (kills the ~5% angle error from
-      the FOV fallback), boresight, ranging, lead prediction.
+      the FOV fallback), boresight, ranging, lead prediction — this is where
+      the physical turret build starts to matter
 - [ ] Phase 4.5: ego-motion compensated differencing (replaces the
-      quasi-static gate so detection works mid-slew).
+      quasi-static gate so detection works mid-slew)
 
 ## Pick-up commands
 
 ```bash
-python3 -m turretvision.main --tune --headless --source gstreamer  # run + tune UI
+python3 -m turretvision.main --tune --headless    # run + tune UI (defaults do the rest)
 #   -> http://<jetson-ip>:8089
 python3 tools/measure_capture.py /dev/video0 --gst   # capture health check
 python3 -m pytest -q && python3 -m ruff check .      # 26 tests

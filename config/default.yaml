@@ -2,9 +2,12 @@
 # shouldn't require re-reading code, it lives here.
 
 camera:
-  backend: v4l2            # v4l2 | gstreamer | replay | synthetic
-                           # gstreamer = Jetson hardware JPEG decode (nvv4l2decoder);
-                           # use it when measure_capture.py says decode is the bottleneck
+  backend: gstreamer       # gstreamer | v4l2 | replay | synthetic
+                           # gstreamer = Jetson hardware JPEG decode (nvv4l2decoder).
+                           # Measured on the OV9782: cv2's v4l2 backend tops out at
+                           # ~34fps effective (57 delivery + 12ms/frame sw decode);
+                           # gstreamer reads 102fps from the same camera. Use v4l2 on
+                           # machines whose OpenCV lacks GStreamer (e.g. pip wheels).
   device: /dev/video0
   width: 1280
   height: 800
@@ -14,11 +17,18 @@ camera:
   replay_realtime: true    # pace replay at recorded fps (false = as fast as possible)
   gst_pipeline: null       # backend=gstreamer: full custom pipeline string override
                            # (must end in an appsink producing BGR)
-  # UVC driver controls applied via v4l2-ctl at startup (name: value), e.g.
-  # locking exposure/WB to manual so frame_diff doesn't see AE/AWB hunting as
-  # motion. The tuning UI's Camera section writes these on Save (to local.yaml).
-  # Empty = leave the driver as-is.
-  v4l2_ctrls: {}
+  # UVC driver controls applied via v4l2-ctl at startup (name: value). These
+  # lock exposure/WB to manual: AE/AWB hunting shifts brightness globally,
+  # which frame_diff reads as full-frame motion, and long auto exposures cap
+  # fps below the mode rate (sensor can't exceed 1/exposure_time). The tuning
+  # UI's Camera section overrides these live and persists on Save (to
+  # local.yaml). Values proven on the OV9782 during Phase 2 bring-up.
+  v4l2_ctrls:
+    auto_exposure: 1               # 1 = manual (UVC menu; 3 = aperture-priority auto)
+    exposure_time_absolute: 80     # 100µs units -> 8ms; keep under the frame period
+    white_balance_automatic: 0
+    white_balance_temperature: 4600
+    backlight_compensation: 0
 
 calibration:
   intrinsics_file: config/camera_intrinsics.yaml   # optional until Phase 4

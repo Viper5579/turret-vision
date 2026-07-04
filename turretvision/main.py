@@ -64,6 +64,25 @@ def build_detector(cfg: Config) -> Detector:
     return DETECTORS[mode](**cfg.section(f"detection.{mode}"))
 
 
+def build_ranger(cfg: Config, mapper: PixelAngleMapper):
+    mode = cfg.get("ranging.mode", "fixed")
+    if mode == "fixed":
+        from .ranging.fixed import FixedRange
+        return FixedRange(cfg.get("ranging.fixed_distance_m", 4.0))
+    if mode == "known_size":
+        from .ranging.known_size import KnownSizeRange
+        return KnownSizeRange(focal_px=mapper.focal_px,
+                              target_size_m=cfg.get("ranging.target_size_m", 0.30))
+    if mode == "aruco_pose":
+        from .ranging.aruco_pose import ArucoPoseRange
+        if mapper.camera_matrix is None:
+            sys.exit("ranging.mode aruco_pose needs calibrated intrinsics "
+                     "(run tools/calibrate_camera.py first)")
+        return ArucoPoseRange(mapper.camera_matrix, mapper.dist_coeffs,
+                              marker_size_m=cfg.get("detection.aruco.marker_size_m", 0.10))
+    sys.exit(f"unknown ranging mode: {mode} (fixed | known_size | aruco_pose)")
+
+
 def build_link(cfg: Config) -> TurretLink:
     backend = cfg.get("link.backend")
     if backend == "console":
@@ -107,6 +126,7 @@ def main(argv=None) -> int:
         fallback_hfov_deg=cfg.get("calibration.fallback_hfov_deg", 70.0),
         boresight_yaw_deg=cfg.get("calibration.boresight_yaw_deg", 0.0),
         boresight_pitch_deg=cfg.get("calibration.boresight_pitch_deg", 0.0),
+        boresight_file=cfg.get("calibration.boresight_file", None),
         undistort_points=cfg.get("calibration.undistort_points", True),
     )
     if not mapper.calibrated:
@@ -114,6 +134,14 @@ def main(argv=None) -> int:
               "(~5% angle error; expected until the Phase 4 calibration tool lands)")
 
     detector = build_detector(cfg)
+    ranger = build_ranger(cfg, mapper)
+    lead = None
+    if cfg.get("lead.enabled", False):
+        from .lead.predictor import LeadPredictor
+        lead = LeadPredictor(
+            projectile_speed_mps=cfg.get("lead.projectile_speed_mps", 50.0),
+            gravity_comp=cfg.get("lead.gravity_comp", True),
+            max_lead_deg=cfg.get("lead.max_lead_deg", 15.0))
     tracker = SingleTargetTracker(
         AlphaBetaFilter(cfg.get("tracking.alpha"), cfg.get("tracking.beta")),
         gate_px=cfg.get("tracking.gate_px"),
@@ -186,6 +214,8 @@ def main(argv=None) -> int:
 
             turret_yaw = telem.yaw_deg if telem else 0.0
             turret_pitch = telem.pitch_deg if telem else 0.0
+            lead_sol = None
+            rng_est = None
             if track is not None:
                 az, el = mapper.pixel_to_angles(track.x, track.y)
                 # Angular rates via the local scale. WHY not per-axis exact math:
@@ -194,12 +224,19 @@ def main(argv=None) -> int:
                 az_rate = track.vx * mapper.deg_per_px
                 el_rate = -track.vy * mapper.deg_per_px
                 valid = track.confidence >= min_conf_ref["value"]
+                rng_est = ranger.estimate(dets, (track.x, track.y))
+                aim_az, aim_el = az, el
+                if lead and rng_est is not None:
+                    lead_sol = lead.solve(az, el, az_rate, el_rate, rng_est.dist_m)
+                    if lead_sol is not None:
+                        aim_az, aim_el = lead_sol.yaw_deg, lead_sol.pitch_deg
                 # Absolute setpoint, clamped Jetson-side too (defense in depth:
                 # the firmware clamps as well, D2) — never send an illegal command.
-                yaw_set = min(max(turret_yaw + az, yaw_lim[0]), yaw_lim[1])
-                pitch_set = min(max(turret_pitch + el, pitch_lim[0]), pitch_lim[1])
+                yaw_set = min(max(turret_yaw + aim_az, yaw_lim[0]), yaw_lim[1])
+                pitch_set = min(max(turret_pitch + aim_el, pitch_lim[0]), pitch_lim[1])
                 aim = AimOutput(frame.t, valid, yaw_set, pitch_set,
-                                az_rate, el_rate, track.confidence)
+                                az_rate, el_rate, track.confidence,
+                                range_m=rng_est.dist_m if rng_est else None)
             else:
                 az = el = az_rate = el_rate = 0.0
                 aim = AimOutput(frame.t, False, turret_yaw, turret_pitch,
@@ -219,9 +256,12 @@ def main(argv=None) -> int:
                     csv_writer.writerow([f"{frame.t:.4f}", 0, "", "", "", "", "", "", "0.0", ""])
 
             if show or tuner:
+                lead_px = (mapper.angles_to_pixel(lead_sol.yaw_deg, lead_sol.pitch_deg)
+                           if lead_sol else None)
                 img = overlay.render(frame.img, track,
                                      (az, el) if track else None, fps.hz, timer.report(),
-                                     detections=dets)
+                                     detections=dets, lead_px=lead_px,
+                                     range_est=rng_est)
                 if tuner:
                     r = timer.report()
                     tuner.publish(img, {

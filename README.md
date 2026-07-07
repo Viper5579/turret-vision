@@ -27,8 +27,16 @@ findings, and pick-up commands.
       predictor with gravity drop; lead point renders on the overlay.
       Hardware validation (range error <15% on ArUco at 2/4/6 m with a tape
       measure) pending — see STATUS.md checklist
-- [ ] Phase 4.5 — ego-motion compensated frame differencing
-- [ ] Phase 5 — replay regression harness, docs polish
+- [x] Phase 4.5 — ego-motion compensated frame differencing: prev frame warped
+      by the telemetry pose delta (PoseHistory interpolation), gate bypassed
+      when a pose is available; detection survives simulated pans in tests
+- [x] Phase 5 — record/replay regression harness: `tools/record.py`,
+      `tools/replay.py --baseline golden.csv` (deterministic replays, CSV
+      diff with tolerances), `logging.record_frames` tee in the pipeline
+- [x] Bonus — ESP32 firmware reference implementation (`firmware/turret/`):
+      protocol + trapezoid control cores host-compiled and parity-tested
+      byte-for-byte / step-for-step against the Python side; Arduino sketch
+      with clamping, e-stop, link-dead safe-hold, homing, 100 Hz telemetry
 
 ## Setup (dev machine / CI)
 ```bash
@@ -132,11 +140,23 @@ the local cv2 window, and the port comes from `ui.tune_port` or `--tune-port`.
 
 ## Verify
 ```bash
-python -m pytest -q      # 64 tests: filters/geometry/tracker, protocol (byte-exact
+python -m pytest -q      # 79 tests: filters/geometry/tracker, protocol (byte-exact
                          # + fuzz), mock turret, serial loopback (pty), calibration
-                         # (synthetic known-camera), ranging, lead, end-to-end
+                         # (synthetic known-camera), ranging, lead, ego-motion comp,
+                         # replay regression, firmware C++ parity (host-compiled)
 ruff check .
 ```
+
+## Recording & replay regression (Phase 5)
+```bash
+python tools/record.py --seconds 10                      # raw frames + true timestamps
+python tools/replay.py logs/rec_X.mp4 --save-baseline golden.csv
+# ...change detector/tracker code or tuning...
+python tools/replay.py logs/rec_X.mp4 --baseline golden.csv   # exit 0 = no regression
+```
+Replays are deterministic (same frames, same config, no wall clock), so any
+CSV drift is your change. `logging.record_frames: true` tees frames during a
+live run instead.
 
 ## Tuning quick reference (config/default.yaml)
 - Tracker feels **laggy** → raise `tracking.alpha` (position trust)

@@ -49,3 +49,13 @@ class TurretLink(ABC):
 
     def close(self) -> None:  # noqa: B027 (optional hook by design)
         pass
+
+
+class NullLink(TurretLink):
+    """No output, no telemetry. For replay regression and benchmarks: a mock
+    turret's wall-clock dynamics would make replays nondeterministic (and its
+    telemetry would gate the detector against motion the RECORDED camera never
+    made), and console prints are noise in an automated diff."""
+
+    def send_aim(self, aim: AimOutput) -> None:
+        pass

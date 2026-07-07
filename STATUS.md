@@ -4,11 +4,13 @@ Last updated: 2026-07-04 · Hardware: Jetson Orin Nano Super + Arducam OV9782 US
 
 ## Where we are
 
-**Phase 2 (vision) runs on real hardware at 79–91 fps. Phase 3 (protocol +
-links) is complete and hardware-tested. Phase 4 (calibration, ranging, lead)
-is code-complete** — its exit criterion (range error <15% on ArUco at
-tape-measured 2/4/6 m) is a hardware measurement waiting on printed
-targets; checklist below.
+**All code phases are complete** — Phase 2 (vision, 79–91 fps on hardware),
+Phase 3 (protocol + links, hardware-tested), Phase 4 (calibration/ranging/
+lead — hardware validation checklist below), Phase 4.5 (ego-motion
+compensation), Phase 5 (replay regression harness), plus the ESP32 firmware
+reference implementation, host-parity-tested before any board exists.
+What remains is hardware: the validation checklists below, the turret build,
+and flashing/verifying the firmware.
 
 ```
 capture (GStreamer hw decode) -> frame_diff (telemetry-gated) -> tracker
@@ -168,6 +170,27 @@ right thing to work on while the calibration prints are on the wall:
   (byte-exact reference: `link/protocol.py`, behavior model: MockLink, live
   debugging: `tools/link_monitor.py`).
 
+## Phase 4.5 + 5 + firmware: what got built (no hardware needed)
+
+- **Ego-motion compensation** (`ego_motion_comp: true` once the real turret
+  exists): the previous frame is warped by the camera pose delta between
+  frame timestamps (telemetry interpolated by `link/pose.PoseHistory`), so
+  differencing works MID-SLEW; the quasi-static gate stays as fallback when
+  no pose is available. Tests prove a panning camera reads as silence while
+  a genuinely moving target is still caught.
+- **Replay regression harness**: `tools/record.py` (raw frames + true grab
+  timestamps), `tools/replay.py --baseline golden.csv` (replays through the
+  REAL main(), deterministic, CSV diff with tolerances, exit code for CI),
+  `logging.record_frames: true` to tee during live runs. Workflow: record
+  once, hack freely, replay to prove nothing broke.
+- **ESP32 firmware** (`firmware/turret/`): protocol + control cores in
+  portable C++, compiled on the host by the test suite and proven
+  byte-for-byte (CRC, TELEM pack, AIM parse, corruption rejection) and
+  step-for-step (trapezoid + feedforward vs MockLink) compatible with the
+  Python side. `turret.ino` adds AccelStepper yaw, PCA9685 pitch, homing,
+  e-stop, link-dead safe-hold, 100 Hz telemetry. `firmware/README.md` has
+  the flash + bring-up sequence (each step states the hardware it needs).
+
 ## Next up
 
 - [ ] Phase 2 sign-off checklist above (10 minutes with the tuning UI open)
@@ -175,10 +198,12 @@ right thing to work on while the calibration prints are on the wall:
 - [ ] Turret mechanical design/build (see hardware section — parallel track)
 - [ ] ESP32 firmware once wired: `firmware/PROTOCOL.md` + `link/protocol.py`
       reference, MockLink behavior model, `tools/link_monitor.py` debugging
-- [ ] **Phase 4.5** (code): ego-motion compensated differencing — warp the
-      previous frame by the telemetry pose delta so detection survives the
-      turret's own motion; consumes Phase 3's telemetry + clock offset
-- [ ] Phase 5: replay regression harness, docs polish
+- [ ] Record a golden replay once live tracking looks right
+      (`tools/record.py` + `tools/replay.py --save-baseline`) — from then on
+      every tuning change can be regression-checked in seconds
+- [ ] Flip `detection.frame_diff.ego_motion_comp: true` once the real turret
+      moves under the camera (it needs real telemetry to help; on a static
+      camera it does nothing useful)
 
 ## Pick-up commands
 
@@ -187,5 +212,5 @@ python3 -m turretvision.main --tune --headless    # run + tune UI (defaults do t
 #   -> http://<jetson-ip>:8089
 python3 tools/sim_target.py                       # Phase 3 exit criteria, scored
 python3 tools/measure_capture.py /dev/video0 --gst   # capture health check
-python3 -m pytest -q && python3 -m ruff check .      # 47 tests
+python3 -m pytest -q && python3 -m ruff check .      # 79 tests
 ```

@@ -48,8 +48,11 @@ detection:
     min_area_px: 40
     max_area_px: 40000
     morph_kernel: 3
-    static_gate_dps: 5.0   # suppress detection while commanded turret speed exceeds this (v1 gate)
-    ego_motion_comp: false # Phase 4.5
+    static_gate_dps: 5.0   # suppress detection while commanded turret speed exceeds this
+                           # (fallback gate; bypassed whenever ego_motion_comp has a pose)
+    ego_motion_comp: false # Phase 4.5: warp prev frame by the telemetry pose delta so
+                           # detection works MID-SLEW. Needs link backend mock|serial
+                           # (telemetry). Turn on once the real turret exists.
   aruco:
     dictionary: DICT_4X4_50
     marker_size_m: 0.10
@@ -92,11 +95,12 @@ turret:
   pitch_max_deg: 60.0
 
 link:
-  backend: console         # console | mock | serial
+  backend: console         # console | mock | serial | none
                            # console = human-readable prints (no telemetry)
                            # mock    = simulated turret dynamics + telemetry (full
                            #           closed loop with zero hardware, SPEC D4)
                            # serial  = real ESP32 over pyserial
+                           # none    = silent no-op (replay regression, benchmarks)
   port: /dev/ttyUSB0
   baud: 115200
   aim_rate_hz: 50          # wire rate for AIM packets/heartbeats (serial backend)

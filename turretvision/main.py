@@ -87,6 +87,9 @@ def build_link(cfg: Config) -> TurretLink:
     backend = cfg.get("link.backend")
     if backend == "console":
         return ConsoleLink(console_rate_hz=cfg.get("link.console_rate_hz", 5.0))
+    if backend == "none":
+        from .link.base import NullLink
+        return NullLink()
     if backend == "mock":
         from .link.mock_link import MockLink
         return MockLink(yaw_limits=(cfg.get("turret.yaw_min_deg", -170.0),
@@ -98,7 +101,7 @@ def build_link(cfg: Config) -> TurretLink:
         from .link.serial_link import SerialLink
         return SerialLink(cfg.get("link.port"), cfg.get("link.baud", 115200),
                           aim_rate_hz=cfg.get("link.aim_rate_hz", 50))
-    sys.exit(f"unknown link backend: {backend} (console | mock | serial)")
+    sys.exit(f"unknown link backend: {backend} (console | mock | serial | none)")
 
 
 def main(argv=None) -> int:
@@ -134,6 +137,13 @@ def main(argv=None) -> int:
               "(~5% angle error; expected until the Phase 4 calibration tool lands)")
 
     detector = build_detector(cfg)
+    pose_hist = None
+    if getattr(detector, "_ego", False):
+        # Ego-motion comp (Phase 4.5): the detector needs the pixel scale and a
+        # pose-at-frame-time lookup fed from telemetry.
+        from .link.pose import PoseHistory
+        detector.px_per_deg = 1.0 / mapper.deg_per_px
+        pose_hist = PoseHistory()
     ranger = build_ranger(cfg, mapper)
     lead = None
     if cfg.get("lead.enabled", False):
@@ -178,6 +188,16 @@ def main(argv=None) -> int:
     fps = RollingRate()
     timer = StageTimer()
 
+    recorder = None
+    if cfg.get("logging.record_frames", False):
+        from datetime import datetime
+
+        from .capture.recorder import Recorder
+        rec_path = (Path(cfg.get("logging.run_log_dir", "logs"))
+                    / f"run_{datetime.now():%Y%m%d_%H%M%S}.mp4")
+        recorder = Recorder(str(rec_path), fps=cfg.get("camera.fps", 60), resolution=(w, h))
+        print(f"[record] raw frames tee -> {rec_path} (+ .timestamps.jsonl)")
+
     csv_writer = None
     csv_file = None
     if cfg.get("logging.csv_state_log", False):
@@ -198,6 +218,8 @@ def main(argv=None) -> int:
                 if isinstance(src, V4L2Camera):
                     continue  # camera: no NEW frame yet, keep polling
                 break         # replay/synthetic: exhausted
+            if recorder:
+                recorder.write(frame)  # raw frame, BEFORE overlay: replays re-detect
             if tuner:
                 tuner.apply_pending()  # slider changes land here, pipeline-thread only
             timer.start()
@@ -207,6 +229,11 @@ def main(argv=None) -> int:
             telem = link.poll_telemetry()
             if telem is not None:
                 detector.set_turret_rate(telem.yaw_rate_dps)
+                if pose_hist is not None:
+                    pose_hist.add(telem)
+                    pose = pose_hist.pose_at(frame.t)
+                    if pose is not None:
+                        detector.set_ego_pose(*pose)
             dets = detector.detect(frame)
             timer.mark("detect")
             track = tracker.step(dets, frame.t)
@@ -286,6 +313,8 @@ def main(argv=None) -> int:
         link.close()
         if tuner:
             tuner.stop()
+        if recorder:
+            recorder.close()
         if csv_file:
             csv_file.close()
         if show:

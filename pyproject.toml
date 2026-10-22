@@ -1,37 +1,46 @@
 [build-system]
-# setuptools>=64 is required for PEP 660 editable installs; JetPack images ship
-# 59.x, so Jetson users must `pip install --upgrade "setuptools>=64" wheel` first
-# (see README "Setup (Jetson)").
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "turret-vision"
-version = "0.2.0"
-description = "Real-time vision/tracking pipeline for an educational turret (Jetson Orin Nano -> ESP32)"
+name = "turret"
+version = "2.0.0.dev0"
+description = "Turret Vision v2: tracking (and eventually intercepting) thrown paper airplanes"
+readme = "README.md"
 requires-python = ">=3.10"
+# Versions that run on the Jetson container (Ubuntu 22.04, Python 3.10) AND a laptop.
+# numpy stays below 2 for TensorRT 10.3's Python bindings (M4).
 dependencies = [
-    "numpy",
-    "opencv-python",   # use the full (non-headless) build on the Jetson for imshow; headless is fine for CI/tests
-    "pyyaml",
-    "pyserial",        # used from Phase 3 onward
+  "numpy>=1.23,<2",
+  "opencv-python-headless>=4.8,<4.11",
+  "pydantic>=2.5,<3",
+  "pyyaml>=6",
+  "pyserial>=3.5",
+  "fastapi>=0.110",
+  "uvicorn>=0.27",
+  "websockets>=12",  # uvicorn serves WebSockets only if this is installed
+  "msgpack>=1.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest>=7", "ruff>=0.5", "httpx>=0.27"]
+
+[project.scripts]
+turret = "turret.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["turretvision*"]
-
-[tool.setuptools.package-data]
-turretvision = ["tune/*.html"]
-
-[tool.ruff]
-line-length = 110
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B"]
+include = ["turret*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["ui", "firmware", "turret/link/messages.py"]  # generated
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003", "RUF046", "SIM108", "B008"]
+

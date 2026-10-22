@@ -1,0 +1,135 @@
+# Single source of truth for the Jetson <-> ESP32 link.
+#
+# Run `python tools/gen_proto.py` after editing. It regenerates:
+#   turret/link/messages.py                 (Python dataclasses)
+#   firmware/lib/proto/src/messages_gen.h   (C++ structs + encode/decode)
+#   firmware/test/test_proto/golden.h       (cross-language test vectors)
+# CI fails if the generated files are stale.
+#
+# Wire format of every packet:
+#   COBS( id:u8 | payload | crc16:u16 little-endian ) 0x00
+# CRC is CRC-16/CCITT-FALSE over id + payload.
+# All multi-byte fields are little-endian. Times are microseconds.
+# Angles are degrees, rates are degrees/second.
+#
+# The CRC32 of this file's message list is the protocol hash. The Jetson
+# refuses to run against firmware that reports a different hash.
+#
+# dir: j2e = Jetson to ESP32, e2j = ESP32 to Jetson.
+# Field types: u8 u16 u32 u64 i8 i16 i32 f32, str<N> (fixed N bytes, NUL padded)
+
+messages:
+  - name: Hello
+    id: 0x01
+    dir: j2e
+    doc: Sent on connect and every 2 s until HelloAck arrives.
+    fields:
+      - {name: proto_hash, type: u32}
+
+  - name: TimePing
+    id: 0x02
+    dir: j2e
+    doc: Clock sync request. The Jetson remembers its own send time by seq.
+    fields:
+      - {name: seq, type: u16}
+
+  - name: Traj
+    id: 0x03
+    dir: j2e
+    doc: >
+      Where the turret should be. The ESP32 extrapolates angle + rate * (now - valid_at_us)
+      until the next Traj arrives. Also the heartbeat: no Traj for timeout_ms means safe stop.
+    fields:
+      - {name: valid_at_us, type: u64, doc: ESP32 clock}
+      - {name: yaw_deg, type: f32}
+      - {name: yaw_rate_dps, type: f32}
+      - {name: pitch_deg, type: f32}
+      - {name: pitch_rate_dps, type: f32}
+      - {name: mode, type: u8, doc: "0 idle, 1 manual, 2 track, 3 engage"}
+      - {name: flags, type: u8, doc: "bit0 estop"}
+
+  - name: Config
+    id: 0x04
+    dir: j2e
+    doc: Pushed after HelloAck. Firmware holds no tuning constants of its own.
+    fields:
+      - {name: steps_per_deg, type: f32}
+      - {name: yaw_min_deg, type: f32}
+      - {name: yaw_max_deg, type: f32}
+      - {name: pitch_min_deg, type: f32}
+      - {name: pitch_max_deg, type: f32}
+      - {name: max_rate_dps, type: f32}
+      - {name: max_accel_dps2, type: f32}
+      - {name: kp, type: f32, doc: "1/s, position error to rate"}
+      - {name: lead_s, type: f32, doc: "rate feedforward lookahead"}
+      - {name: trigger_hz, type: f32, doc: "0 disables the camera trigger"}
+      - {name: timeout_ms, type: u16}
+      - {name: servo_us_min, type: u16}
+      - {name: servo_us_max, type: u16}
+
+  - name: Fire
+    id: 0x05
+    dir: j2e
+    doc: Laser or launcher pulse. Ignored unless armed switch, engage mode and fresh heartbeat all hold.
+    fields:
+      - {name: shot_id, type: u16}
+      - {name: duration_ms, type: u16}
+
+  - name: HelloAck
+    id: 0x81
+    dir: e2j
+    fields:
+      - {name: proto_hash, type: u32}
+      - {name: fw_version, type: u16}
+      - {name: uptime_ms, type: u32}
+      - {name: features, type: u16, doc: "bit0 encoder, bit1 imu, bit2 trigger, bit3 laser"}
+
+  - name: TimePong
+    id: 0x82
+    dir: e2j
+    fields:
+      - {name: seq, type: u16}
+      - {name: t_rx_us, type: u64}
+      - {name: t_tx_us, type: u64}
+
+  - name: Telem
+    id: 0x83
+    dir: e2j
+    doc: 200 Hz state report.
+    fields:
+      - {name: t_us, type: u64}
+      - {name: yaw_enc_deg, type: f32, doc: "encoder angle, NaN without encoder"}
+      - {name: yaw_step_deg, type: f32, doc: "step-count angle"}
+      - {name: yaw_rate_dps, type: f32}
+      - {name: yaw_ref_deg, type: f32}
+      - {name: pitch_cmd_deg, type: f32}
+      - {name: gyro_z_dps, type: f32, doc: "camera gyro yaw rate, NaN without IMU"}
+      - {name: status, type: u16, doc: "bit0 linked, bit1 configured, bit2 estop, bit3 armed switch, bit4 yaw limit, bit5 timeout"}
+      - {name: faults, type: u16, doc: "bit0 missed steps, bit1 encoder, bit2 imu"}
+
+  - name: FrameSync
+    id: 0x84
+    dir: e2j
+    doc: Sent at every camera trigger edge with the pose latched at that instant.
+    fields:
+      - {name: seq, type: u32}
+      - {name: t_us, type: u64}
+      - {name: yaw_deg, type: f32, doc: "best yaw at the edge (encoder, else steps)"}
+      - {name: yaw_rate_dps, type: f32}
+      - {name: gyro_yaw_deg, type: f32, doc: "integrated gyro angle, NaN without IMU"}
+      - {name: pitch_deg, type: f32}
+
+  - name: FireAck
+    id: 0x85
+    dir: e2j
+    fields:
+      - {name: shot_id, type: u16}
+      - {name: t_us, type: u64}
+      - {name: accepted, type: u8}
+
+  - name: Log
+    id: 0x86
+    dir: e2j
+    fields:
+      - {name: level, type: u8, doc: "0 debug, 1 info, 2 warn, 3 error"}
+      - {name: text, type: str48}

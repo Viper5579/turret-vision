@@ -1,0 +1,19 @@
+# Used through ./tv; you should not need to call docker compose yourself.
+services:
+  turret:
+    image: ${TURRET_IMAGE:-ghcr.io/viper5579/turret-vision:latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    network_mode: host # GUI on :8080 of the Jetson, reachable from your laptop/phone
+    restart: unless-stopped
+    command: ["python3", "-m", "turret", "serve", "${TURRET_MODE:---hw}"]
+    volumes:
+      - ../data:/data
+      # The whole /dev, plus permission for the device classes below, so the camera and
+      # the ESP32 can be unplugged and replugged without restarting the container.
+      - /dev:/dev
+    device_cgroup_rules:
+      - "c 81:* rmw" # video4linux (camera)
+      - "c 188:* rmw" # ttyUSB (ESP32 DevKit's CP2102)
+      - "c 166:* rmw" # ttyACM (other USB serial boards)

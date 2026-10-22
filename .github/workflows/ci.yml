@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python (3.10, same versions as the Jetson container)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install (pinned)
+        run: |
+          # The lock is resolved for the Jetson (aarch64); use its exact versions here too.
+          pip install uv
+          uv pip compile pyproject.toml --extra dev --python-version 3.10 -c requirements.lock -o /tmp/req.txt -q
+          uv pip install --system -r /tmp/req.txt -e .
+      - name: Lint and format
+        run: |
+          ruff check .
+          ruff format --check turret tests tools
+      - name: Generated protocol code is current
+        run: python tools/gen_proto.py --check
+      - name: Lockfile covers pyproject
+        run: |
+          # Resolving with the lock as a constraint reproduces the lock exactly, unless
+          # pyproject gained or changed a dependency the lock does not satisfy.
+          uv pip compile pyproject.toml --extra dev --python-version 3.10 \
+            --python-platform aarch64-unknown-linux-gnu -c requirements.lock -o /tmp/lock.txt -q
+          diff <(grep -v '^ *#' requirements.lock | grep -v '^$' | sort) <(grep -v '^ *#' /tmp/lock.txt | grep -v '^$' | sort) \
+            || { echo "requirements.lock is stale: regenerate it (command at its top)"; exit 1; }
+      - name: Tests
+        run: python -m pytest -q
+      - name: Simulator gate (tracking must not regress)
+        run: python -m turret sim --seconds 10 --check
+
+  firmware:
+    name: Firmware (native tests + ESP32 build)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('firmware/platformio.ini') }}
+      - run: pip install "platformio==6.1.18"
+      - name: Protocol tests on the host (decode Python-made golden frames)
+        working-directory: firmware
+        run: pio test -e native
+      - name: Build for the ESP32
+        working-directory: firmware
+        run: pio run -e esp32dev
+
+  ui:
+    name: Mission Control GUI
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+  image:
+    name: Jetson container (arm64)
+    needs: [python, firmware, ui]
+    runs-on: ubuntu-22.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: turret-vision:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test inside the image
+        run: |
+          docker run --rm turret-vision:ci python3 -m turret doctor --quick
+          docker run --rm turret-vision:ci python3 -m turret sim --seconds 6 --check
+          docker run --rm turret-vision:ci python3 -m pytest -q tests -k "not sim_end_to_end"
+      - name: Publish (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          img=ghcr.io/${GITHUB_REPOSITORY,,}
+          docker tag turret-vision:ci "$img:latest"
+          docker tag turret-vision:ci "$img:${GITHUB_SHA::7}"
+          docker push "$img:latest"
+          docker push "$img:${GITHUB_SHA::7}"
